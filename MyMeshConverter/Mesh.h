@@ -58,7 +58,7 @@ public:
     Mesh();
     ~Mesh();
 
-    bool Load(std::string fileName);
+    bool Load(std::string fileName, unsigned int flag);
 
     std::vector<SubMesh>* GetSubVec()
     {

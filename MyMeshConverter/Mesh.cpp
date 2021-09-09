@@ -27,13 +27,13 @@ Mesh::~Mesh()
 
 }
 
-bool Mesh::Load(std::string fileName)
+bool Mesh::Load(std::string fileName, unsigned int flag)
 {
     Assimp::Importer importer;
 
     const aiScene* pScene = importer.ReadFile(fileName,
         aiProcess_Triangulate | aiProcess_CalcTangentSpace |
-        aiProcess_ConvertToLeftHanded);
+        flag);
 
     if (pScene == nullptr)
     {
