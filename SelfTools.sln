@@ -5,6 +5,8 @@ VisualStudioVersion = 16.0.30611.23
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EncodingTranslater", "EncodingTranslater\EncodingTranslater.vcxproj", "{C99E12D4-2D6D-41A6-BE23-7E5861BBDD99}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MyMeshConverter", "MyMeshConverter\MyMeshConverter.vcxproj", "{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,6 +23,14 @@ Global
 		{C99E12D4-2D6D-41A6-BE23-7E5861BBDD99}.Release|x64.Build.0 = Release|x64
 		{C99E12D4-2D6D-41A6-BE23-7E5861BBDD99}.Release|x86.ActiveCfg = Release|Win32
 		{C99E12D4-2D6D-41A6-BE23-7E5861BBDD99}.Release|x86.Build.0 = Release|Win32
+		{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}.Debug|x64.ActiveCfg = Debug|x64
+		{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}.Debug|x64.Build.0 = Debug|x64
+		{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}.Debug|x86.ActiveCfg = Debug|Win32
+		{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}.Debug|x86.Build.0 = Debug|Win32
+		{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}.Release|x64.ActiveCfg = Release|x64
+		{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}.Release|x64.Build.0 = Release|x64
+		{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}.Release|x86.ActiveCfg = Release|Win32
+		{68FFE286-D5F5-4299-B3DC-1967DBCAE75E}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
