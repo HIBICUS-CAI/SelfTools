@@ -3,6 +3,7 @@
 
 #include "Mesh.h"
 #include "Json.h"
+#include "Binary.h"
 
 enum class CONVERT_TYPE
 {
@@ -131,7 +132,7 @@ int main(int argc, char** argv)
     }
 
     Mesh* m = new Mesh;
-    unsigned int size = g_InputFiles.size();
+    unsigned int size = (unsigned int)g_InputFiles.size();
     unsigned int index = 0;
     std::string p = "";
     for (auto& file : g_InputFiles)
@@ -150,7 +151,8 @@ int main(int argc, char** argv)
             SaveToFileNormal(p.c_str(), index);
             break;
         case CONVERT_TYPE::BINARY:
-            std::cout << "not support yet" << std::endl;
+            p = file + ".meshdata";
+            SaveToFileBinary(p.c_str(), m);
             break;
         default:
             break;
