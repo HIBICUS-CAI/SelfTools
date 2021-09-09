@@ -31,6 +31,21 @@ public:
 
     ~SubMesh();
 
+    std::vector<MESH_VERTEX>* GetVertexVec()
+    {
+        return &mVertices;
+    }
+
+    std::vector<unsigned int>* GetIndexVec()
+    {
+        return &mIndices;
+    }
+
+    std::vector<MESH_TEXTURE>* GetTextureVec()
+    {
+        return &mTextures;
+    }
+
 private:
     std::vector<MESH_VERTEX> mVertices;
     std::vector<unsigned int> mIndices;
@@ -44,6 +59,21 @@ public:
     ~Mesh();
 
     bool Load(std::string fileName);
+
+    std::vector<SubMesh>* GetSubVec()
+    {
+        return &mSubMeshes;
+    }
+
+    std::string GetTextureType()
+    {
+        return mTextureType;
+    }
+
+    std::string GetDirectory()
+    {
+        return mDirectory;
+    }
 
 private:
     void ProcessNode(

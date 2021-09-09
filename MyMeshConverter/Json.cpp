@@ -4,11 +4,14 @@
 #include <rapidjson\prettywriter.h>
 #include <vector>
 #include <assert.h>
-#include <iostream>
+#include <Windows.h>
 
 using namespace rapidjson;
 
 static std::vector<StringBuffer*> g_Buffers = {};
+
+void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
+	Mesh* _mesh);
 
 void CreateStringBuffers(unsigned int _number)
 {
@@ -30,15 +33,15 @@ void WriteInfoToBuffer(unsigned int _index, Mesh* _mesh)
 	PrettyWriter<StringBuffer> writer(*buffer);
 	writer.SetMaxDecimalPlaces(18);
 
-	// TODO START
+	ProcessMeshPretty(&writer, _mesh);
+
+	assert(writer.IsComplete());
 }
 
 // TEMP
 void PrintOut(unsigned int _index)
 {
-	std::cout << 
-		std::string(_strdup(g_Buffers[_index]->GetString())) <<
-		std::endl;
+	OutputDebugStringA((g_Buffers[_index])->GetString());
 }
 
 void ClearUp()
@@ -49,4 +52,103 @@ void ClearUp()
 	}
 
 	g_Buffers.clear();
+}
+
+void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
+	Mesh* _mesh)
+{
+	_writer->StartObject();
+
+	_writer->String("directory");
+	_writer->String(_mesh->GetDirectory().c_str());
+	_writer->String("texture-type");
+	_writer->String(_mesh->GetTextureType().c_str());
+	
+	_writer->String("sub-model-size");
+	_writer->Uint(_mesh->GetSubVec()->size());
+	_writer->String("sub-model");
+
+	_writer->StartArray();
+	for (auto& sub : *(_mesh->GetSubVec()))
+	{
+		_writer->StartObject();
+		_writer->String("index-size");
+		_writer->Uint(sub.GetIndexVec()->size());
+		_writer->String("vertex-size");
+		_writer->Uint(sub.GetVertexVec()->size());
+		_writer->String("texture-size");
+		_writer->Uint(sub.GetTextureVec()->size());
+
+		_writer->String("index");
+		_writer->StartArray();
+		for (auto& index : *(sub.GetIndexVec()))
+		{
+			_writer->Uint(index);
+		}
+		_writer->EndArray();
+
+		_writer->String("vertex");
+		_writer->StartArray();
+		for (auto& vertex : *(sub.GetVertexVec()))
+		{
+			_writer->StartObject();
+
+			_writer->String("position");
+			_writer->StartArray();
+			for (size_t i = 0; i < 3; i++)
+			{
+				_writer->Double(vertex.Position[i]);
+			}
+			_writer->EndArray();
+
+			_writer->String("normal");
+			_writer->StartArray();
+			for (size_t i = 0; i < 3; i++)
+			{
+				_writer->Double(vertex.Normal[i]);
+			}
+			_writer->EndArray();
+
+			_writer->String("tangent");
+			_writer->StartArray();
+			for (size_t i = 0; i < 3; i++)
+			{
+				_writer->Double(vertex.Tangent[i]);
+			}
+			_writer->EndArray();
+
+			_writer->String("texcoord");
+			_writer->StartArray();
+			for (size_t i = 0; i < 2; i++)
+			{
+				_writer->Double(vertex.TexCoord[i]);
+			}
+			_writer->EndArray();
+
+			_writer->EndObject();
+		}
+		_writer->EndArray();
+
+		_writer->String("texture");
+		_writer->StartArray();
+		for (auto& texture : *(sub.GetTextureVec()))
+		{
+			_writer->StartObject();
+
+			_writer->String("type");
+			_writer->String(texture.Type.c_str());
+
+			_writer->String("path");
+			_writer->String(texture.Path.c_str());
+
+			_writer->EndObject();
+		}
+		_writer->EndArray();
+
+		_writer->EndObject();
+	}
+
+	_writer->EndArray();
+
+	_writer->EndObject();
 }

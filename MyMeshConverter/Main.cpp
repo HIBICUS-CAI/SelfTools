@@ -1,25 +1,26 @@
 #include <iostream>
 #include <string>
-#include <rapidjson\stringbuffer.h>
-#include <rapidjson\prettywriter.h>
-#include <rapidjson\document.h>
+//#include <rapidjson\stringbuffer.h>
+//#include <rapidjson\prettywriter.h>
+//#include <rapidjson\document.h>
 
 #include "Mesh.h"
+#include "Json.h"
 
-using namespace rapidjson;
-
-void ShowJsonText(Document* doc)
-{
-    rapidjson::StringBuffer buffer;
-
-    buffer.Clear();
-
-    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
-    writer.SetMaxDecimalPlaces(18);
-    doc->Accept(writer);
-
-    std::cout << std::string(_strdup(buffer.GetString())) << std::endl;
-}
+//using namespace rapidjson;
+//
+//void ShowJsonText(Document* doc)
+//{
+//    rapidjson::StringBuffer buffer;
+//
+//    buffer.Clear();
+//
+//    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+//    writer.SetMaxDecimalPlaces(18);
+//    doc->Accept(writer);
+//
+//    std::cout << std::string(_strdup(buffer.GetString())) << std::endl;
+//}
 
 int main(int argc, char** argv)
 {
@@ -31,15 +32,13 @@ int main(int argc, char** argv)
         std::cout << argv[i] << std::endl;
     }
 
-    Document d = {};
-    d.Parse(json);
-    Value& s = d["stars"];
-    s.SetDouble(1000.0 / 60.0);
-
-    ShowJsonText(&d);
-
     Mesh* m = new Mesh;
-    m->Load("");
+    m->Load("Dragon.FBX");
+
+    CreateStringBuffers(1);
+    WriteInfoToBuffer(0, m);
+    PrintOut(0);
+    ClearUp();
 
     return 0;
 }
