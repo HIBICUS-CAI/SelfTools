@@ -131,14 +131,13 @@ int main(int argc, char** argv)
         }
     }
 
-    Mesh* m = new Mesh;
-    unsigned int size = (unsigned int)g_InputFiles.size();
+    CreateStringBuffers((unsigned int)g_InputFiles.size());
     unsigned int index = 0;
     std::string p = "";
     for (auto& file : g_InputFiles)
     {
+        Mesh* m = new Mesh;
         m->Load(file, g_ProcessFlag);
-        CreateStringBuffers(size);
         WriteInfoToBuffer(index, m);
         switch (g_ConvertType)
         {
@@ -157,6 +156,7 @@ int main(int argc, char** argv)
         default:
             break;
         }
+        delete m;
 
         ++index;
     }
