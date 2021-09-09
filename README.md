@@ -15,15 +15,15 @@
 - 可以传递特殊的处理flag
 
 ### 命令
-  -type : file style to save info
-        json-pretty :   convert into formated json
-        json-normal :   convert into unformated json
-        binary :        convert into binary file
+      -type : file style to save info 
+            json-pretty :   convert into formated json 
+            json-normal :   convert into unformated json 
+            binary :        convert into binary file  
 
-  -flag : the flag pass to assimp to process mesh
-        left-hand :     process mesh to LH coord
-        right-hand :    process mesh to RH coord
-        optimize :      process with optimzie flag
+      -flag : the flag pass to assimp to process mesh 
+            left-hand :     process mesh to LH coord 
+            right-hand :    process mesh to RH coord 
+            optimize :      process with optimzie flag 
 
-  -input : the model file you want to convert
-        [file name] :   the file's name without path
+      -input : the model file you want to convert 
+            [file name] :   the file's name without path 
