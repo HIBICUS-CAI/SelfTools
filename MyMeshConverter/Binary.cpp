@@ -145,6 +145,9 @@ void ProcessSubTexture(std::ofstream* _file,
 
         size = (int)tex.Path.length() + 1;
         _file->write((char*)&size, sizeof(size));
+        tex.Path.replace(tex.Path.find_last_of("."), 4, ".png");
+        tex.Path.replace(tex.Path.find_last_of("."), 4, ".png");
+        tex.Path.replace(tex.Path.find_last_of("."), 4, ".png");
         _file->write(tex.Path.c_str(), size);
     }
 }
