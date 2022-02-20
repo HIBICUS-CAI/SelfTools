@@ -1,6 +1,4 @@
-﻿using EncodeConverter;
-
-namespace ScratchPaper_00_CSharp_Temp
+﻿namespace EncodeConverter
 {
     internal class Program
     {
