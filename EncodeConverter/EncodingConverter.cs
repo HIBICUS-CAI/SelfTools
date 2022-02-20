@@ -4,7 +4,7 @@ namespace EncodeConverter
 {
     public enum DEFAULT_ENCODING
     {
-        UTF8, GB2312, SHIFTJIS,
+        UTF8BOM, GB2312, SHIFTJIS,
 
         SIZE
     }
@@ -17,11 +17,12 @@ namespace EncodeConverter
             new Encoding[(int)DEFAULT_ENCODING.SIZE];
 
         public static EncodingConverter Instance { get { return mConverter; } }
+        public Encoding[] DEncoding { get { return mDefaultEncodings; } }
 
         public EncodingConverter()
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            mDefaultEncodings[(int)DEFAULT_ENCODING.UTF8] =
+            mDefaultEncodings[(int)DEFAULT_ENCODING.UTF8BOM] =
                 Encoding.GetEncoding(65001);
             mDefaultEncodings[(int)DEFAULT_ENCODING.GB2312] =
                 Encoding.GetEncoding(936);
