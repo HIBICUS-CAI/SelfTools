@@ -19,7 +19,7 @@ namespace EncodeConverter
         public static EncodingConverter Instance { get { return mConverter; } }
         public Encoding[] DEncoding { get { return mDefaultEncodings; } }
 
-        public EncodingConverter()
+        private EncodingConverter()
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             mDefaultEncodings[(int)DEFAULT_ENCODING.UTF8BOM] =

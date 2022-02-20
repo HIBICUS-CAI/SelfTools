@@ -17,6 +17,13 @@
             e65001.OutputFileContext();
             e936.OutputFileContext();
             e932.OutputFileContext();
+
+            string[] pat = new string[] { "*.json", "*.hlsl", "*.txt" };
+            FolderReader.Instance.GetFilesInFolder(
+                "TestData65001",
+                pat, true);
+
+            return;
         }
     }
 }
