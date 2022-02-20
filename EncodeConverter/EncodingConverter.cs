@@ -30,7 +30,7 @@ namespace EncodeConverter
                 Encoding.GetEncoding(932);
         }
 
-        public string[] ConvertEncodingToList(string[] _texts,
+        public string[] ConvertEncoding(string[] _texts,
             DEFAULT_ENCODING _srcEncoding, DEFAULT_ENCODING _dstEncoding)
         {
             List<string> result = new();
@@ -50,6 +50,23 @@ namespace EncodeConverter
             }
 
             return result.ToArray();
+        }
+
+        public string ConvertEncoding(string _text,
+            DEFAULT_ENCODING _srcEncoding, DEFAULT_ENCODING _dstEncoding)
+        {
+            Encoding srcEncoding = mDefaultEncodings[(int)_srcEncoding];
+            Encoding dstEncoding = mDefaultEncodings[(int)_dstEncoding];
+
+            byte[] originByte = srcEncoding.GetBytes(_text);
+            byte[] convertByte = Encoding.Convert(srcEncoding,
+                dstEncoding, originByte);
+            char[] convertChars = new char[dstEncoding.GetCharCount(
+                convertByte, 0, convertByte.Length)];
+            dstEncoding.GetChars(convertByte, 0, convertByte.Length,
+                convertChars, 0);
+
+            return new string(convertChars);
         }
     }
 }
