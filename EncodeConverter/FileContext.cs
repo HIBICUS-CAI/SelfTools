@@ -65,8 +65,8 @@ namespace EncodeConverter
         {
             string[] dstContent = EncodingConverter.Instance.ConvertEncoding(
                 mFileContent, mEncoding, _dstEncoding);
-            FileContext result = new(_newDirectory, mFileName, dstContent,
-                _dstEncoding);
+            FileContext result = new($"{_newDirectory}{mDirectoryName}",
+                mFileName, dstContent, _dstEncoding);
             return result;
         }
 
@@ -75,8 +75,10 @@ namespace EncodeConverter
         {
             string dstFileName = EncodingConverter.Instance.ConvertEncoding(
                 mFileName, mEncoding, _dstEncoding);
-            FileContext result = new(_newDirectory, dstFileName, mFileContent,
-                _dstEncoding);
+            string dstDirName = EncodingConverter.Instance.ConvertEncoding(
+                mDirectoryName, mEncoding, _dstEncoding);
+            FileContext result = new($"{_newDirectory}{dstDirName}",
+                dstFileName, mFileContent, _dstEncoding);
             return result;
         }
 
@@ -85,10 +87,12 @@ namespace EncodeConverter
         {
             string dstFileName = EncodingConverter.Instance.ConvertEncoding(
                 mFileName, mEncoding, _dstEncoding);
+            string dstDirName = EncodingConverter.Instance.ConvertEncoding(
+                mDirectoryName, mEncoding, _dstEncoding);
             string[] dstContent = EncodingConverter.Instance.ConvertEncoding(
                 mFileContent, mEncoding, _dstEncoding);
-            FileContext result = new(_newDirectory, dstFileName, dstContent,
-                _dstEncoding);
+            FileContext result = new($"{_newDirectory}{dstDirName}",
+                dstFileName, dstContent, _dstEncoding);
             return result;
         }
     }
