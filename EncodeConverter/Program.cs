@@ -1,2 +1,13 @@
-﻿// See https://aka.ms/new-console-template for more information
-Console.WriteLine("Ready to convert encoding,\nGoing on man!");
+﻿using EncodeConverter;
+
+namespace ScratchPaper_00_CSharp_Temp
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            foreach (string arg in args) { Console.WriteLine(arg); }
+            Console.WriteLine(EncodingConverter.Instance.ToString());
+        }
+    }
+}

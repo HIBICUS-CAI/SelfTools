@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "EncodeConverter": {
+      "commandName": "Project",
+      "commandLineArgs": "-a -b -c cyh hycframe3d"
+    }
+  }
+}
