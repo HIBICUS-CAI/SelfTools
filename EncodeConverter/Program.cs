@@ -20,6 +20,11 @@
 
             string[] pat = new string[] { "*.json", "*.hlsl", "*.txt" };
             FolderReader.Instance.GetFilesInFolder("TestData65001", pat, true);
+            FolderReader.Instance.OutPutFoundFiles();
+            FolderReader.Instance.GetFilesInFolder("TestData936", pat, true);
+            FolderReader.Instance.OutPutFoundFiles();
+            FolderReader.Instance.GetFilesInFolder("TestData932", pat, false);
+            FolderReader.Instance.OutPutFoundFiles();
         }
     }
 }

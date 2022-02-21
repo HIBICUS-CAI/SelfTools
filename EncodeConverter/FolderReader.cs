@@ -51,5 +51,17 @@
                 }
             }
         }
+
+        public void OutPutFoundFiles()
+        {
+            Console.WriteLine("=============================\n" +
+                "Files have been found :");
+            foreach (FILE_INFO file in mFiles)
+            {
+                Console.WriteLine($"dir : {file.mDirectory}, " +
+                    $"file : {file.mFileName}");
+            }
+            Console.WriteLine("=============================");
+        }
     }
 }
