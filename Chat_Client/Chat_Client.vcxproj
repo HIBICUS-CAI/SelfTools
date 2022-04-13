@@ -141,6 +141,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="ChatApp.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="SocketAddress.cpp" />
     <ClCompile Include="SocketUtils.cpp" />
@@ -148,12 +149,17 @@
     <ClCompile Include="UdpSocket.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AppBasicDef.h" />
     <ClInclude Include="BasicDef.h" />
+    <ClInclude Include="ChatApp.h" />
     <ClInclude Include="LogUtils.h" />
     <ClInclude Include="SocketAddress.h" />
     <ClInclude Include="SocketUtils.h" />
     <ClInclude Include="TcpSocket.h" />
     <ClInclude Include="UdpSocket.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="cpp.hint" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

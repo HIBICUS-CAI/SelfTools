@@ -1,29 +1,12 @@
-#include <cstdlib>
-#include <cstdio>
-#include <vector>
-#include <string>
-
-using uint = unsigned int;
-
-bool Init();
-
-void GetInRoom(uint _roomID);
+#include "AppBasicDef.h"
+#include "ChatApp.h"
 
 int main()
 {
-    Init();
+	if (ChatApp::Instance()->Init())
+	{
+		ChatApp::Instance()->Stop();
+	}
 
     return 0;
-}
-
-bool Init()
-{
-    std::system("mode con cols=120 lines=30 && cls");
-
-    return true;
-}
-
-void GetInRoom(uint _roomID)
-{
-
 }
