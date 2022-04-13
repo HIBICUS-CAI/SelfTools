@@ -5,8 +5,10 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <Windows.h>
 
 using uint = unsigned int;
+using ushort = unsigned short;
 
 constexpr uint APP_WIDTH = 120;
 constexpr uint APP_HEIGHT = 30;

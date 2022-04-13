@@ -1,13 +1,19 @@
 #include "ChatApp.h"
+#include "ScreenBuffer.h"
 
 bool ChatApp::Init()
 {
-    std::system("mode con cols=120 lines=30 && cls");
+    char cmd[1024] = "";
+    int hei = APP_HEIGHT, wid = APP_WIDTH;
+    std::sprintf(cmd, "mode con cols=%d lines=%d && cls", wid, hei);
+    std::system(cmd);
+
+    if (!ScreenBuffer::Instance()->Init()) { return false; }
 
     return true;
 }
 
 void ChatApp::Stop()
 {
-
+    ScreenBuffer::Instance()->Stop();
 }

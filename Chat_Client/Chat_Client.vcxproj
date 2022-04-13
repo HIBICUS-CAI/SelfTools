@@ -114,7 +114,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
     </ClCompile>
     <Link>
@@ -129,7 +129,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
     </ClCompile>
     <Link>
@@ -143,6 +143,7 @@
   <ItemGroup>
     <ClCompile Include="ChatApp.cpp" />
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="ScreenBuffer.cpp" />
     <ClCompile Include="SocketAddress.cpp" />
     <ClCompile Include="SocketUtils.cpp" />
     <ClCompile Include="TcpSocket.cpp" />
@@ -153,6 +154,7 @@
     <ClInclude Include="BasicDef.h" />
     <ClInclude Include="ChatApp.h" />
     <ClInclude Include="LogUtils.h" />
+    <ClInclude Include="ScreenBuffer.h" />
     <ClInclude Include="SocketAddress.h" />
     <ClInclude Include="SocketUtils.h" />
     <ClInclude Include="TcpSocket.h" />

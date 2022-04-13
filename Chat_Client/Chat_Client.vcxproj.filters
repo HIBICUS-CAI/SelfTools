@@ -31,6 +31,9 @@
     <ClCompile Include="ChatApp.cpp">
       <Filter>AppAbout</Filter>
     </ClCompile>
+    <ClCompile Include="ScreenBuffer.cpp">
+      <Filter>AppAbout</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BasicDef.h">
@@ -55,6 +58,9 @@
       <Filter>AppAbout</Filter>
     </ClInclude>
     <ClInclude Include="ChatApp.h">
+      <Filter>AppAbout</Filter>
+    </ClInclude>
+    <ClInclude Include="ScreenBuffer.h">
       <Filter>AppAbout</Filter>
     </ClInclude>
   </ItemGroup>
