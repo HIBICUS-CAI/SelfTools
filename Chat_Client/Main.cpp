@@ -2,22 +2,23 @@
 #include "ChatApp.h"
 #include "ScreenBuffer.h"
 
+#define ca ChatApp::Instance()
+
 int main()
 {
-    if (ChatApp::Instance()->Init())
+    if (ca->Init())
     {
-        while (true)
+        uint exitCmd = 0;
+
+        while (!exitCmd)
         {
-            ScreenBuffer::Instance()->ClearBuffer();
-            static int i = 0;
-            ScreenBuffer::Instance()->WriteLineTo("wocao hahaha", i++);
-            if (i == 30) { i = 0; }
-            ScreenBuffer::Instance()->PrintOut();
-            ScreenBuffer::Instance()->SetCursorToLastLineAt(20);
-            Sleep(100);
+            uint error = 1;
+            while (error) { error = ca->RunLogIn(); }
+
+            exitCmd = ca->RunChatRoom();
         }
 
-        ChatApp::Instance()->Stop();
+        ca->Stop();
     }
 
     return 0;

@@ -63,6 +63,7 @@
     <ClInclude Include="ScreenBuffer.h">
       <Filter>AppAbout</Filter>
     </ClInclude>
+    <ClInclude Include="UserMessage.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint">
