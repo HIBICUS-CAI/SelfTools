@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 
 namespace Chat_Server
 {
+    using su = StringUtils;
+
     public class ConnectManager
     {
         public static ConnectManager Instance { get; } = new();
@@ -51,26 +53,17 @@ namespace Chat_Server
                     int inByte = client.Receive(userInfo);
                     if (inByte > 0)
                     {
-                        Int32 roomID = BitConverter.ToInt32(userInfo, 0);
+                        int roomID = BitConverter.ToInt32(userInfo, 0);
                         char nameLenth = Convert.ToChar(
-                            userInfo[sizeof(Int32)]);
-                        char[] name = new char[nameLenth];
-                        for (int i = 0; i < nameLenth; i++)
-                        {
-                            name[i] = Convert.ToChar(
-                                userInfo[sizeof(Int32) + i + 1]);
-                        }
-                        string userName = new(name);
+                            userInfo[sizeof(int)]);
+                        string userName = su.AscByteToStr(
+                            userInfo, sizeof(int) + 1, nameLenth);
 
                         Console.WriteLine(
                             $"username : {userName}, room : {roomID}, " +
                             $"has accept by {Listener}");
 
-                        byte[] data = new byte[nameLenth + 1];
-                        for (int i = 0; i < nameLenth; i++)
-                        {
-                            data[i] = Convert.ToByte(name[i]);
-                        }
+                        byte[] data = su.StrToAscByte(userName);
                         client.Send(data);
                     }
                 }
