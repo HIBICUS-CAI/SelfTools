@@ -1,4 +1,4 @@
-﻿namespace CHAT_SERVER
+﻿namespace Chat_Server
 {
     internal class Program
     {
@@ -6,6 +6,17 @@
         {
             Console.WriteLine("Hello, World!");
             foreach (string arg in args) { Console.WriteLine(arg); }
+
+            ConnectManager.Instance.StartListenThread();
+
+            //Thread.Sleep(1000);
+            while (true)
+            {
+
+            }
+
+            ConnectManager.Instance.ShouldStop = true;
+            ConnectManager.Instance.JoinListenThread();
         }
     }
 }

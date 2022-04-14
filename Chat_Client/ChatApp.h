@@ -2,6 +2,7 @@
 
 #include "AppBasicDef.h"
 #include "UserMessage.h"
+#include "TcpSocket.h"
 
 class ChatApp
 {
@@ -18,8 +19,8 @@ private:
     int mRoomID = 0;
     std::string mUserName = "";
 
-    uint mCurrMebNum = 0;
-    std::vector<UserMessage> mAllMess = {};
+    TcpSocketPtr mClientSocket = nullptr;
 
     std::vector<std::string> mOnlineUser = { "a","ab","abc" };
+    std::vector<UserMessage> mAllMess = {};
 };

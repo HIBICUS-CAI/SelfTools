@@ -1,7 +1,11 @@
 #include "ChatApp.h"
 #include "ScreenBuffer.h"
+#include "LogUtils.h"
+#include "SocketUtils.h"
+#include "SocketAddress.h"
 
 #define sb ScreenBuffer::Instance()
+#define su SocketUtils
 
 bool ChatApp::Init()
 {
@@ -11,12 +15,14 @@ bool ChatApp::Init()
     std::system(cmd);
 
     if (!sb->Init()) { return false; }
+    if (!su::SockInit()) { return false; }
 
     return true;
 }
 
 void ChatApp::Stop()
 {
+    su::SocketStop();
     sb->Stop();
 }
 
@@ -53,6 +59,28 @@ uint ChatApp::RunLogIn()
         mUserName = inputStr;
         mUserName = mUserName.substr(0,
             mUserName.length() > 16 ? 16 : mUserName.length());
+
+        mClientSocket = su::CreateTcpSocket(ADDRFAM::INET);
+        auto addr = CreateIPv4FromString("192.168.0.125:32580");
+        if (!mClientSocket || !addr) { return 1; }
+        if (!mClientSocket->Connect(*addr))
+        {
+            size_t byteSize = sizeof(mRoomID) + sizeof(char) +
+                mUserName.length();
+            char buffer[32] = "";
+            char nameLen = static_cast<char>(mUserName.length());
+            std::memcpy(buffer, &mRoomID, sizeof(int));
+            std::memcpy(buffer + sizeof(int), &nameLen, sizeof(char));
+            std::memcpy(buffer + sizeof(char) + sizeof(int),
+                mUserName.c_str(), nameLen);
+
+            mClientSocket->Send(buffer, byteSize);
+
+            std::strcpy(buffer, "");
+            mClientSocket->Receive(buffer, 32);
+            printf("%s", buffer);
+            Sleep(5000);
+        }
     }
     else
     {
@@ -69,7 +97,7 @@ uint ChatApp::RunChatRoom()
         sb->ClearBuffer();
 
         std::string headStr = "本房间当前共" +
-            std::to_string(mCurrMebNum) + "人在线";
+            std::to_string(mOnlineUser.size()) + "人在线";
         sb->WriteLineTo(headStr.c_str(), 0);
         sb->WriteLineTo("--------------------------------------------------"\
             "--------------------------------------------------"\
@@ -94,7 +122,11 @@ uint ChatApp::RunChatRoom()
         char inputStr[256] = "";
         int input = std::scanf("%s", inputStr);
 
-        if (std::string(inputStr) == "/QUIT") { return 0; }
+        if (std::string(inputStr) == "/QUIT")
+        {
+            mClientSocket.reset();
+            return 0;
+        }
         else if (std::string(inputStr) == "/MEMBER")
         {
             std::string list = "";

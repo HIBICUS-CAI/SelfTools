@@ -32,7 +32,10 @@ void ScreenBuffer::ClearBuffer()
 
 void ScreenBuffer::WriteLineTo(const char* _string, uint _lineIndex)
 {
-    std::memcpy(mScreenBuffer + APP_WIDTH * _lineIndex, _string, strlen(_string));
+    std::memcpy(
+        mScreenBuffer +
+        static_cast<int64_t>(APP_WIDTH) * static_cast<int64_t>(_lineIndex),
+        _string, strlen(_string));
 }
 
 void ScreenBuffer::SetCursorToLastLineAt(short _position)
