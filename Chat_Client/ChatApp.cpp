@@ -7,12 +7,27 @@
 #define sb ScreenBuffer::Instance()
 #define su SocketUtils
 
+static bool g_IsInRoom = false;
+static CRITICAL_SECTION g_DataLock = {};
+
+#define lockon EnterCriticalSection(&g_DataLock)
+#define unlock LeaveCriticalSection(&g_DataLock)
+
+#define RECV(_SOCKET_PTR, _START_POS, _HAS_READ, _NEED_SIZE)\
+while (_HAS_READ < _NEED_SIZE)\
+{\
+    _HAS_READ += _SOCKET_PTR->Receive(_START_POS + _HAS_READ,\
+        _NEED_SIZE - static_cast<size_t>(_HAS_READ));\
+}
+
 bool ChatApp::Init()
 {
     char cmd[1024] = "";
     int hei = APP_HEIGHT, wid = APP_WIDTH;
     std::sprintf(cmd, "mode con cp select=936 && mode con cols=%d lines=%d && cls", wid, hei);
     std::system(cmd);
+
+    InitializeCriticalSection(&g_DataLock);
 
     if (!sb->Init()) { return false; }
     if (!su::SockInit()) { return false; }
@@ -22,6 +37,8 @@ bool ChatApp::Init()
 
 void ChatApp::Stop()
 {
+    DeleteCriticalSection(&g_DataLock);
+
     su::SocketStop();
     sb->Stop();
 }
@@ -78,8 +95,10 @@ uint ChatApp::RunLogIn()
 
             std::strcpy(buffer, "");
             mClientSocket->Receive(buffer, 32);
-            printf("%s", buffer);
-            Sleep(5000);
+
+            g_IsInRoom = true;
+            mChatProcessThread = (HANDLE)_beginthreadex(nullptr, 0,
+                ChatSocketProcess, &mClientSocket, 0, nullptr);
         }
     }
     else
@@ -96,19 +115,23 @@ uint ChatApp::RunChatRoom()
     {
         sb->ClearBuffer();
 
+        lockon;
         std::string headStr = "本房间当前共" +
             std::to_string(mOnlineUser.size()) + "人在线";
+        unlock;
         sb->WriteLineTo(headStr.c_str(), 0);
         sb->WriteLineTo("--------------------------------------------------"\
             "--------------------------------------------------"\
             "--------------------", 1);
 
         uint lowStart = 27;
+        lockon;
         for (auto& mess : mAllMess)
         {
             lowStart = mess.PrintToBuffer(lowStart);
             if (lowStart == 2) { break; }
         }
+        unlock;
 
         sb->WriteLineTo("--------------------------------------------------"\
             "--------------------------------------------------"\
@@ -124,12 +147,15 @@ uint ChatApp::RunChatRoom()
 
         if (std::string(inputStr) == "/QUIT")
         {
+            g_IsInRoom = false;
             mClientSocket.reset();
+            WaitForSingleObject(mChatProcessThread, INFINITE);
             return 0;
         }
         else if (std::string(inputStr) == "/MEMBER")
         {
             std::string list = "";
+            lockon;
             for (auto& name : mOnlineUser)
             {
                 list += (name + " ");
@@ -137,6 +163,7 @@ uint ChatApp::RunChatRoom()
 
             mAllMess.insert(mAllMess.begin(),
                 UserMessage("MEMBER LIST", list));
+            unlock;
         }
         else
         {
@@ -144,5 +171,70 @@ uint ChatApp::RunChatRoom()
         }
     }
 
+    return 0;
+}
+
+std::vector<std::string>& ChatApp::GetUserList()
+{
+    return mOnlineUser;
+}
+
+unsigned __stdcall ChatSocketProcess(void* _args)
+{
+    assert(_args);
+    TcpSocketPtr socket = *((TcpSocketPtr*)_args);
+    char* recvBuffer = new char[1024];
+    assert(recvBuffer);
+
+    while (g_IsInRoom)
+    {
+        int firstFlagByte = socket->Receive(recvBuffer, 4);
+        if (!firstFlagByte) { continue; }
+        RECV(socket, recvBuffer, firstFlagByte, 4);
+        MESS messFlg = static_cast<MESS>(*((int*)recvBuffer));
+        switch (messFlg)
+        {
+        case MESS::USER_LIST:
+        {
+            lockon;
+            ChatApp::Instance()->GetUserList().clear();
+            int userSizeByte = socket->Receive(recvBuffer, 4);
+            RECV(socket, recvBuffer, userSizeByte, 4);
+            int userSize = *((int*)recvBuffer);
+
+            for (int i = 0; i < userSize; i++)
+            {
+                int nameLenByte = socket->Receive(recvBuffer, 4);
+                RECV(socket, recvBuffer, nameLenByte, 4);
+                int nameLen = *((int*)recvBuffer);
+                int nameByte = socket->Receive(recvBuffer, nameLen);
+                RECV(socket, recvBuffer, nameByte, nameLen);
+                std::string userName = recvBuffer;
+                ChatApp::Instance()->GetUserList().push_back(userName);
+                socket->Receive(recvBuffer, 1); // 读取最后1字节
+            }
+            unlock;
+            break;
+        }
+        case MESS::NEW_MESS:
+        {
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    socket.reset();
+    socket.reset();
+    socket.reset();
+    socket.reset();
+    socket.reset();
+    socket.reset();
+    socket.reset();
+    socket.reset();
+    socket.reset();
+
+    delete[] recvBuffer;
     return 0;
 }

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Net.Sockets;
+using System.Runtime.Serialization.Formatters.Binary;
 
 namespace Chat_Server
 {
@@ -40,8 +41,56 @@ namespace Chat_Server
 
             public static EventMessage SyncUserList(string[] _list)
             {
+                int type = (int)SendMessType.USER_LIST;
+                byte[] typeData = BitConverter.GetBytes(type);
+
+                int count = _list.Length;
+                byte[] countData = BitConverter.GetBytes(count);
+
+                int typeDataSize = typeData.Length;
+                int countDataSize = countData.Length;
+
+                int allNameDataSize = 0;
+                List<Tuple<int, byte[]>> allName = new();
+                allName.Capacity = _list.Length;
+
+                foreach (var name in _list)
+                {
+                    int nameSize = name.Length;
+                    byte[] nameSizeData = BitConverter.GetBytes(nameSize);
+                    byte[] nameData = StringUtils.StrToAscByte(name);
+                    byte[] aNameData = new byte[
+                        nameSizeData.Length + nameData.Length];
+                    Buffer.BlockCopy(nameSizeData, 0,
+                        aNameData, 0, nameSizeData.Length);
+                    Buffer.BlockCopy(nameData, 0,
+                        aNameData, nameSizeData.Length, nameData.Length);
+                    int aNameDataSize = aNameData.Length;
+                    allName.Add(new(aNameDataSize, aNameData));
+                    allNameDataSize += aNameDataSize;
+                }
+
+                int allDataSize =
+                    typeDataSize + countDataSize + allNameDataSize;
+                byte[] allData = new byte[allDataSize];
+
+                int dstStart = 0;
+                Buffer.BlockCopy(typeData, 0,
+                    allData, dstStart, typeDataSize);
+                dstStart += typeDataSize;
+                Buffer.BlockCopy(countData, 0,
+                    allData, dstStart, countDataSize);
+                dstStart += countDataSize;
+                foreach (var aName in allName)
+                {
+                    Buffer.BlockCopy(aName.Item2, 0,
+                        allData, dstStart, aName.Item2.Length);
+                    dstStart += aName.Item1;
+                }
+
                 EventMessage @event = new(SendMessType.USER_LIST,
-                    (uint)_list.Length);
+                    (uint)allDataSize);
+                @event.Data = allData;
 
                 return @event;
             }
@@ -56,7 +105,7 @@ namespace Chat_Server
 
             public void SendTo(Socket _client)
             {
-                //_client.Send(Data);
+                _client.Send(Data);
                 Console.WriteLine($"send {Data} : {_client}");
             }
         }
@@ -97,7 +146,7 @@ namespace Chat_Server
                             int firstReceive = item.Value.Receive(firstFlag);
                             if (firstReceive > 0)
                             {
-                                if (BitConverter.ToInt32(firstFlag, 0) == 
+                                if (BitConverter.ToInt32(firstFlag, 0) ==
                                     (int)EventMessage.SendMessType.NEW_MESS)
                                 {
 

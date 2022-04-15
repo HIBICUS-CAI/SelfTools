@@ -1,12 +1,14 @@
 ﻿#pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
 #include <string>
 #include <memory>
-#include <Windows.h>
+#include <windows.h>
+#include <process.h>
 
 using uint = unsigned int;
 using ushort = unsigned short;
