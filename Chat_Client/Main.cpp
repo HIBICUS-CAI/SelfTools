@@ -1,4 +1,4 @@
-#include "AppBasicDef.h"
+﻿#include "AppBasicDef.h"
 #include "ChatApp.h"
 #include "ScreenBuffer.h"
 

@@ -1,4 +1,4 @@
-#include "ChatApp.h"
+ï»¿#include "ChatApp.h"
 #include "ScreenBuffer.h"
 #include "LogUtils.h"
 #include "SocketUtils.h"
@@ -11,7 +11,7 @@ bool ChatApp::Init()
 {
     char cmd[1024] = "";
     int hei = APP_HEIGHT, wid = APP_WIDTH;
-    std::sprintf(cmd, "mode con cols=%d lines=%d && cls", wid, hei);
+    std::sprintf(cmd, "mode con cp select=936 && mode con cols=%d lines=%d && cls", wid, hei);
     std::system(cmd);
 
     if (!sb->Init()) { return false; }
@@ -31,11 +31,11 @@ uint ChatApp::RunLogIn()
     mAllMess.clear();
 
     sb->ClearBuffer();
-    sb->WriteLineTo("                    ÓÚÏÂ·½ÊäÈëÀ¸ÖÐÌîÈë·¿¼äºÅÂë£¨ÎÞ¿Õ¸ñ£©", 13);
+    sb->WriteLineTo("                    äºŽä¸‹æ–¹è¾“å…¥æ ä¸­å¡«å…¥æˆ¿é—´å·ç ï¼ˆæ— ç©ºæ ¼ï¼‰", 13);
     sb->WriteLineTo("--------------------------------------------------"\
         "--------------------------------------------------"\
         "--------------------", 28);
-    sb->WriteLineTo("·¿¼äID:", 29);
+    sb->WriteLineTo("æˆ¿é—´ID:", 29);
     sb->PrintOut();
     sb->SetCursorToLastLineAt(7);
 
@@ -45,11 +45,11 @@ uint ChatApp::RunLogIn()
     else { return 1; }
 
     sb->ClearBuffer();
-    sb->WriteLineTo("                    ÓÚÏÂ·½ÊäÈëÀ¸ÖÐÌîÈëÓÃ»§Ãû£¨16byte£¬ÎÞ¿Õ¸ñ£©", 13);
+    sb->WriteLineTo("                    äºŽä¸‹æ–¹è¾“å…¥æ ä¸­å¡«å…¥ç”¨æˆ·åï¼ˆ16byteï¼Œæ— ç©ºæ ¼ï¼‰", 13);
     sb->WriteLineTo("--------------------------------------------------"\
         "--------------------------------------------------"\
         "--------------------", 28);
-    sb->WriteLineTo("ÓÃ»§Ãû:", 29);
+    sb->WriteLineTo("ç”¨æˆ·å:", 29);
     sb->PrintOut();
     sb->SetCursorToLastLineAt(7);
 
@@ -96,8 +96,8 @@ uint ChatApp::RunChatRoom()
     {
         sb->ClearBuffer();
 
-        std::string headStr = "±¾·¿¼äµ±Ç°¹²" +
-            std::to_string(mOnlineUser.size()) + "ÈËÔÚÏß";
+        std::string headStr = "æœ¬æˆ¿é—´å½“å‰å…±" +
+            std::to_string(mOnlineUser.size()) + "äººåœ¨çº¿";
         sb->WriteLineTo(headStr.c_str(), 0);
         sb->WriteLineTo("--------------------------------------------------"\
             "--------------------------------------------------"\

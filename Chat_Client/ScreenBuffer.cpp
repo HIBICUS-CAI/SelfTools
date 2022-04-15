@@ -1,4 +1,4 @@
-#include "ScreenBuffer.h"
+﻿#include "ScreenBuffer.h"
 
 bool ScreenBuffer::Init()
 {
