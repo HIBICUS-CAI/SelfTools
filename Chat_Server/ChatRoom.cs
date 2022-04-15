@@ -25,9 +25,8 @@ namespace Chat_Server
         {
             public enum SendMessType
             {
-                ROOM_LOGIN = 0,
-                ROOM_QUIT = 1,
-                NEW_MESS = 2
+                USER_LIST = 0,
+                NEW_MESS = 1
             }
 
             public SendMessType Type { get; }
@@ -39,18 +38,10 @@ namespace Chat_Server
                 Data = new byte[_dataSize];
             }
 
-            public static EventMessage CreateLogIn(string _userName)
+            public static EventMessage SyncUserList(string[] _list)
             {
-                EventMessage @event = new(SendMessType.ROOM_LOGIN,
-                    (uint)_userName.Length);
-
-                return @event;
-            }
-
-            public static EventMessage CreateQuit(string _userName)
-            {
-                EventMessage @event = new(SendMessType.ROOM_QUIT,
-                    (uint)_userName.Length);
+                EventMessage @event = new(SendMessType.USER_LIST,
+                    (uint)_list.Length);
 
                 return @event;
             }
@@ -91,17 +82,49 @@ namespace Chat_Server
 
         private void RunProcess()
         {
+            List<string> errorUser = new();
+            errorUser.Capacity = 64;
+
             while (Users.Any())
             {
-                if (EventMessages.Any())
+                lock (Clients)
                 {
-                    EventMessage @event = EventMessages.Dequeue();
                     foreach (var item in Clients)
                     {
-                        @event.SendTo(item.Value);
+                        if (item.Value.Poll(0, SelectMode.SelectRead))
+                        {
+                            byte[] firstFlag = new byte[4];
+                            int firstReceive = item.Value.Receive(firstFlag);
+                            if (firstReceive > 0)
+                            {
+                                if (BitConverter.ToInt32(firstFlag, 0) == 
+                                    (int)EventMessage.SendMessType.NEW_MESS)
+                                {
+
+                                }
+                            }
+                            else
+                            {
+                                errorUser.Add(item.Key);
+                            }
+                        }
+                    }
+
+                    foreach (var item in errorUser) { RemoveUser(item); }
+                    errorUser.Clear();
+
+                    if (EventMessages.Any())
+                    {
+                        EventMessage @event = EventMessages.Dequeue();
+                        foreach (var item in Clients)
+                        {
+                            @event.SendTo(item.Value);
+                        }
                     }
                 }
             }
+
+            ConnectManager.Instance.RemoveChatRoom(Id);
         }
 
         public void AddUser(string _userName, Socket _socket)
@@ -114,7 +137,8 @@ namespace Chat_Server
                 {
                     Thread.Start();
                 }
-                EventMessages.Enqueue(EventMessage.CreateLogIn(_userName));
+                EventMessages.Enqueue(
+                    EventMessage.SyncUserList(Users.ToArray()));
             }
         }
 
@@ -125,12 +149,8 @@ namespace Chat_Server
                 ConnectManager.Instance.CloseSocket(Clients[_userName]);
                 Clients.Remove(_userName);
                 Users.Remove(_userName);
-                if (!Users.Any())
-                {
-                    Thread.Join();
-                    ConnectManager.Instance.RemoveChatRoom(Id);
-                }
-                EventMessages.Enqueue(EventMessage.CreateQuit(_userName));
+                EventMessages.Enqueue(
+                    EventMessage.SyncUserList(Users.ToArray()));
             }
         }
     }

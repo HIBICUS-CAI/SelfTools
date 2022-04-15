@@ -75,7 +75,10 @@ namespace Chat_Server
                             Console.WriteLine(
                             $"room : {roomID}, has been created");
                         }
-                        ChatRooms[roomID].AddUser(userName, client);
+                        lock (ChatRooms[roomID].Clients)
+                        {
+                            ChatRooms[roomID].AddUser(userName, client);
+                        }
                         Console.WriteLine(
                             $"username : {userName}, " +
                             $"has been added to room : {roomID}");
