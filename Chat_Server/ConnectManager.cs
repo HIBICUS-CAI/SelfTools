@@ -19,13 +19,16 @@ namespace Chat_Server
         public List<Socket> AllClients { get; }
         public bool ShouldStop { get; set; }
 
+        public SortedDictionary<int, ChatRoom> ChatRooms { get; set; }
+
         private ConnectManager()
         {
             int port = 32580;
             IPAddress address = IPAddress.Any;
-            Listener = new TcpListener(address, port);
-            AllClients = new List<Socket>();
+            Listener = new(address, port);
+            AllClients = new();
             ShouldStop = false;
+            ChatRooms = new();
         }
 
         public void StartListenThread()
@@ -65,6 +68,17 @@ namespace Chat_Server
 
                         byte[] data = su.StrToAscByte(userName);
                         client.Send(data);
+
+                        if (!ChatRooms.ContainsKey(roomID))
+                        {
+                            ChatRooms.Add(roomID, new ChatRoom(roomID));
+                            Console.WriteLine(
+                            $"room : {roomID}, has been created");
+                        }
+                        ChatRooms[roomID].AddUser(userName, client);
+                        Console.WriteLine(
+                            $"username : {userName}, " +
+                            $"has been added to room : {roomID}");
                     }
                 }
             }
@@ -80,6 +94,11 @@ namespace Chat_Server
         {
             foreach (var socket in AllClients) socket.Close();
             AllClients.Clear();
+        }
+
+        public void RemoveChatRoom(int _id)
+        {
+            ChatRooms.Remove(_id);
         }
     }
 }
