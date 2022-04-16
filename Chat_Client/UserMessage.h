@@ -79,6 +79,17 @@ public:
         return static_cast<uint>(_endLineIndex - i);
     }
 
+    const std::string& GetName() const { return mUserName; }
+    const std::string GetText() const
+    {
+        std::string allInOne = "";
+        for (auto& sub : mMessageVec)
+        {
+            allInOne += sub;
+        }
+        return allInOne;
+    }
+
 private:
     std::string mUserName;
     std::vector<std::string> mMessageVec;

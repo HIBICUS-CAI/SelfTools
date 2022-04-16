@@ -167,7 +167,10 @@ uint ChatApp::RunChatRoom()
         }
         else
         {
-            mAllMess.insert(mAllMess.begin(), UserMessage(mUserName, inputStr));
+            //mAllMess.insert(mAllMess.begin(), UserMessage(mUserName, inputStr));
+            lockon;
+            mForSendMess.push(UserMessage(mUserName, inputStr));
+            unlock;
         }
     }
 
@@ -179,15 +182,56 @@ std::vector<std::string>& ChatApp::GetUserList()
     return mOnlineUser;
 }
 
+std::queue<UserMessage>& ChatApp::GetNeedSend()
+{
+    return mForSendMess;
+}
+
+std::vector<UserMessage>& ChatApp::GetAllMess()
+{
+    return mAllMess;
+}
+
 unsigned __stdcall ChatSocketProcess(void* _args)
 {
     assert(_args);
     TcpSocketPtr socket = *((TcpSocketPtr*)_args);
     char* recvBuffer = new char[1024];
+    char* sendBuffer = new char[1024];
     assert(recvBuffer);
+    assert(sendBuffer);
 
     while (g_IsInRoom)
     {
+        lockon;
+        auto& sendQueue = ChatApp::Instance()->GetNeedSend();
+        while (!sendQueue.empty())
+        {
+            int messType = (int)(MESS::NEW_MESS);
+            auto& mess = sendQueue.front();
+            std::string name = mess.GetName();
+            int nameLen = static_cast<int>(name.length());
+            std::string text = mess.GetText();
+            int textLen = static_cast<int>(text.length());
+            sendQueue.pop();
+
+            std::memset(sendBuffer, 0, 1024);
+            auto startPos = sendBuffer;
+            std::memcpy(startPos, &messType, sizeof(int));
+            startPos += sizeof(int);
+            std::memcpy(startPos, &nameLen, sizeof(int));
+            startPos += sizeof(int);
+            std::memcpy(startPos, name.c_str(), nameLen);
+            startPos += nameLen;
+            std::memcpy(startPos, &textLen, sizeof(int));
+            startPos += sizeof(int);
+            std::memcpy(startPos, text.c_str(), textLen);
+
+            size_t allByte = (sizeof(int) * 3) + nameLen + textLen;
+            socket->Send(sendBuffer, allByte);
+        }
+        unlock;
+
         std::vector<TcpSocketPtr> checkRecv = {};
         std::vector<TcpSocketPtr> couldRecv = {};
         checkRecv.push_back(socket);
@@ -204,6 +248,7 @@ unsigned __stdcall ChatSocketProcess(void* _args)
         case MESS::USER_LIST:
         {
             lockon;
+            std::memset(recvBuffer, '\0', 1024);
             ChatApp::Instance()->GetUserList().clear();
             int userSizeByte = socket->Receive(recvBuffer, 4);
             RECV(socket, recvBuffer, userSizeByte, 4);
@@ -226,6 +271,30 @@ unsigned __stdcall ChatSocketProcess(void* _args)
         }
         case MESS::NEW_MESS:
         {
+            lockon;
+            auto& allMessVec = ChatApp::Instance()->GetAllMess();
+            std::memset(recvBuffer, '\0', 1024);
+
+            int nameLenByte = socket->Receive(recvBuffer, 4);
+            RECV(socket, recvBuffer, nameLenByte, 4);
+            int nameLen = *((int*)recvBuffer);
+            std::memset(recvBuffer, '\0', 1024);
+            int nameByte = socket->Receive(recvBuffer, nameLen);
+            RECV(socket, recvBuffer, nameByte, nameLen);
+            std::string nameStr = std::string(recvBuffer);
+            std::memset(recvBuffer, '\0', 1024);
+
+            int textLenByte = socket->Receive(recvBuffer, 4);
+            RECV(socket, recvBuffer, textLenByte, 4);
+            int textLen = *((int*)recvBuffer);
+            std::memset(recvBuffer, '\0', 1024);
+            int textByte = socket->Receive(recvBuffer, textLen);
+            RECV(socket, recvBuffer, textByte, textLen);
+            std::string textStr = std::string(recvBuffer);
+            std::memset(recvBuffer, '\0', 1024);
+
+            allMessVec.insert(allMessVec.begin(), UserMessage(nameStr, textStr));
+            unlock;
             break;
         }
         default:
@@ -233,6 +302,7 @@ unsigned __stdcall ChatSocketProcess(void* _args)
         }
     }
 
+    delete[] sendBuffer;
     delete[] recvBuffer;
     return 0;
 }

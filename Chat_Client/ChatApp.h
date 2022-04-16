@@ -21,6 +21,8 @@ public:
     uint RunLogIn();
     uint RunChatRoom();
     std::vector<std::string>& GetUserList();
+    std::queue<UserMessage>& GetNeedSend();
+    std::vector<UserMessage>& GetAllMess();
 
 private:
     int mRoomID = 0;
@@ -31,6 +33,7 @@ private:
 
     std::vector<std::string> mOnlineUser = { "a","ab","abc" };
     std::vector<UserMessage> mAllMess = {};
+    std::queue<UserMessage> mForSendMess = {};
 };
 
 unsigned __stdcall ChatSocketProcess(void* _args);

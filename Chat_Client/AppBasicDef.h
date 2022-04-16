@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
+#include <queue>
 #include <string>
 #include <memory>
 #include <windows.h>

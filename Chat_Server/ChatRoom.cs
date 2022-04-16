@@ -155,7 +155,44 @@ namespace Chat_Server
                                 if (BitConverter.ToInt32(firstFlag, 0) ==
                                     (int)EventMessage.SendMessType.NEW_MESS)
                                 {
+                                    byte[] intByte = new byte[4];
+                                    int recvByte = item.Value.Receive(intByte);
+                                    int nameLen = BitConverter.ToInt32(intByte, 0);
+                                    byte[] nameLenData = BitConverter.GetBytes(nameLen);
+                                    byte[] nameData = new byte[nameLen];
+                                    recvByte = item.Value.Receive(nameData);
+                                    string name = StringUtils.AscByteToStr(nameData,
+                                        0, (uint)nameLen);
+                                    int messType = 1;
+                                    byte[] typeData = BitConverter.GetBytes(messType);
 
+                                    recvByte = item.Value.Receive(intByte);
+                                    int textLen = BitConverter.ToInt32(intByte, 0);
+                                    byte[] textLenData = BitConverter.GetBytes(textLen);
+                                    byte[] textData = new byte[textLen];
+                                    recvByte = item.Value.Receive(textData);
+                                    string text = StringUtils.AscByteToStr(textData,
+                                        0, (uint)textLen);
+
+                                    Console.WriteLine($"{name} : {text}");
+
+                                    int sendAllSize = (sizeof(int) * 3) + nameLen + textLen;
+                                    byte[] sendAllData = new byte[sendAllSize];
+                                    int startPos = 0;
+                                    Buffer.BlockCopy(typeData, 0, sendAllData, startPos, typeData.Length);
+                                    startPos += typeData.Length;
+                                    Buffer.BlockCopy(nameLenData, 0, sendAllData, startPos, nameLenData.Length);
+                                    startPos += nameLenData.Length;
+                                    Buffer.BlockCopy(nameData, 0, sendAllData, startPos, nameData.Length);
+                                    startPos += nameData.Length;
+                                    Buffer.BlockCopy(textLenData, 0, sendAllData, startPos, textLenData.Length);
+                                    startPos += textLenData.Length;
+                                    Buffer.BlockCopy(textData, 0, sendAllData, startPos, textData.Length);
+
+                                    EventMessage @event = new(EventMessage.SendMessType.NEW_MESS,
+                                        (uint)sendAllSize);
+                                    @event.Data = sendAllData;
+                                    EventMessages.Enqueue(@event);
                                 }
                             }
                             else
