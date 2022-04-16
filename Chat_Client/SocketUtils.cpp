@@ -118,7 +118,8 @@ int SocketUtils::Select(const std::vector<TcpSocketPtr>* _inReadSet,
     fd_set* writePtr = FillSetFromVector(write, _inWriteSet);
     fd_set* exceptPtr = FillSetFromVector(except, _inExceptSet);
 
-    int toRet = select(0, readPtr, writePtr, exceptPtr, nullptr);
+    static const timeval wait = { 0,1 };
+    int toRet = select(0, readPtr, writePtr, exceptPtr, &wait);
 
     if (toRet > 0)
     {

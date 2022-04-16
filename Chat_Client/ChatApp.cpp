@@ -148,8 +148,8 @@ uint ChatApp::RunChatRoom()
         if (std::string(inputStr) == "/QUIT")
         {
             g_IsInRoom = false;
-            mClientSocket.reset();
             WaitForSingleObject(mChatProcessThread, INFINITE);
+            mClientSocket->~TcpSocket();
             return 0;
         }
         else if (std::string(inputStr) == "/MEMBER")
@@ -188,6 +188,13 @@ unsigned __stdcall ChatSocketProcess(void* _args)
 
     while (g_IsInRoom)
     {
+        std::vector<TcpSocketPtr> checkRecv = {};
+        std::vector<TcpSocketPtr> couldRecv = {};
+        checkRecv.push_back(socket);
+        int result = SocketUtils::Select(&checkRecv, &couldRecv,
+            nullptr, nullptr, nullptr, nullptr);
+        if (!result) { continue; }
+
         int firstFlagByte = socket->Receive(recvBuffer, 4);
         if (!firstFlagByte) { continue; }
         RECV(socket, recvBuffer, firstFlagByte, 4);
@@ -207,9 +214,10 @@ unsigned __stdcall ChatSocketProcess(void* _args)
                 int nameLenByte = socket->Receive(recvBuffer, 4);
                 RECV(socket, recvBuffer, nameLenByte, 4);
                 int nameLen = *((int*)recvBuffer);
-                int nameByte = socket->Receive(recvBuffer, nameLen);
-                RECV(socket, recvBuffer, nameByte, nameLen);
-                std::string userName = recvBuffer;
+                char tempName[32] = "";
+                int nameByte = socket->Receive(tempName, nameLen);
+                RECV(socket, tempName, nameByte, nameLen);
+                std::string userName = tempName;
                 ChatApp::Instance()->GetUserList().push_back(userName);
                 socket->Receive(recvBuffer, 1); // 读取最后1字节
             }
@@ -224,16 +232,6 @@ unsigned __stdcall ChatSocketProcess(void* _args)
             break;
         }
     }
-
-    socket.reset();
-    socket.reset();
-    socket.reset();
-    socket.reset();
-    socket.reset();
-    socket.reset();
-    socket.reset();
-    socket.reset();
-    socket.reset();
 
     delete[] recvBuffer;
     return 0;

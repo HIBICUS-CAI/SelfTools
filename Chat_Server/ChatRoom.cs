@@ -142,6 +142,12 @@ namespace Chat_Server
                     {
                         if (item.Value.Poll(0, SelectMode.SelectRead))
                         {
+                            if (item.Value.Available == 0)
+                            {
+                                errorUser.Add(item.Key);
+                                continue;
+                            }
+
                             byte[] firstFlag = new byte[4];
                             int firstReceive = item.Value.Receive(firstFlag);
                             if (firstReceive > 0)
