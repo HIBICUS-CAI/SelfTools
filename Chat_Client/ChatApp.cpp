@@ -144,9 +144,15 @@ uint ChatApp::RunChatRoom()
 
         static char inputStr[1024] = "";
         fgets(inputStr, 1024, stdin);
-        if ((strlen(inputStr) > 0) && (inputStr[strlen(inputStr) - 1] == '\n'))
+        if ((strlen(inputStr) > 0) &&
+            (inputStr[strlen(inputStr) - 1] == '\n') &&
+            std::string(inputStr) != "\n")
         {
             inputStr[strlen(inputStr) - 1] = '\0';
+        }
+        else
+        {
+            continue;
         }
 
         if (std::string(inputStr) == "/QUIT")
