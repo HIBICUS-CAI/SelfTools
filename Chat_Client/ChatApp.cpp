@@ -143,7 +143,11 @@ uint ChatApp::RunChatRoom()
         sb->SetCursorToLastLineAt(static_cast<short>(sendStr.size()));
 
         static char inputStr[1024] = "";
-        int input = std::scanf("%s", inputStr);
+        fgets(inputStr, 1024, stdin);
+        if ((strlen(inputStr) > 0) && (inputStr[strlen(inputStr) - 1] == '\n'))
+        {
+            inputStr[strlen(inputStr) - 1] = '\0';
+        }
 
         if (std::string(inputStr) == "/QUIT")
         {
@@ -167,7 +171,6 @@ uint ChatApp::RunChatRoom()
         }
         else
         {
-            //mAllMess.insert(mAllMess.begin(), UserMessage(mUserName, inputStr));
             lockon;
             mForSendMess.push(UserMessage(mUserName, inputStr));
             unlock;
