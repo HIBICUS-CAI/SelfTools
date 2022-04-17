@@ -154,7 +154,7 @@ uint ChatApp::RunChatRoom()
             g_IsInRoom = false;
             WaitForSingleObject(mChatProcessThread, INFINITE);
             mClientSocket->~TcpSocket();
-            return 0;
+            break;
         }
         else if (std::string(inputStr) == "/MEMBER")
         {
