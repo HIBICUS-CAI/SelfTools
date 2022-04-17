@@ -142,7 +142,7 @@ uint ChatApp::RunChatRoom()
         sb->PrintOut();
         sb->SetCursorToLastLineAt(static_cast<short>(sendStr.size()));
 
-        char inputStr[256] = "";
+        static char inputStr[1024] = "";
         int input = std::scanf("%s", inputStr);
 
         if (std::string(inputStr) == "/QUIT")

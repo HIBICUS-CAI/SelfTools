@@ -83,7 +83,9 @@ public:
     const std::string GetText() const
     {
         std::string allInOne = "";
-        for (auto& sub : mMessageVec)
+        std::vector<std::string> reverse = mMessageVec;
+        std::reverse(reverse.begin(), reverse.end());
+        for (auto& sub : reverse)
         {
             allInOne += sub;
         }
