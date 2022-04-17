@@ -78,7 +78,7 @@ uint ChatApp::RunLogIn()
             mUserName.length() > 16 ? 16 : mUserName.length());
 
         mClientSocket = su::CreateTcpSocket(ADDRFAM::INET);
-        auto addr = CreateIPv4FromString("192.168.0.125:32580");
+        auto addr = CreateIPv4FromString("119.91.136.28:32580");
         if (!mClientSocket || !addr) { return 1; }
         if (!mClientSocket->Connect(*addr))
         {
