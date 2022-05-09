@@ -19,7 +19,8 @@ SubMesh::~SubMesh()
 
 Mesh::Mesh()
     :mSubMeshes({}), mLoadedTexs({}),
-    mDirectory(""), mTextureType("")
+    mDirectory(""), mTextureType(""),
+    mNodes({})
 {
 
 }
@@ -53,6 +54,52 @@ bool Mesh::Load(std::string fileName, unsigned int flag)
 void Mesh::ProcessNode(
     aiNode* node, const aiScene* scene)
 {
+    SCENE_NODE thisNode = {};
+    thisNode.Name = node->mName.C_Str();
+    if (node->mParent)
+    {
+        thisNode.ParentName = node->mParent->mName.C_Str();
+    }
+    thisNode.ChildrenName.resize(node->mNumChildren);
+    for (uint32_t end = node->mNumChildren, i = 0; i < end; i++)
+    {
+        thisNode.ChildrenName[i] = node->mChildren[i]->mName.C_Str();
+    }
+    thisNode.ThisToParentMatrix[0][0] =
+        (double)node->mTransformation.a1;
+    thisNode.ThisToParentMatrix[0][1] =
+        (double)node->mTransformation.a2;
+    thisNode.ThisToParentMatrix[0][2] =
+        (double)node->mTransformation.a3;
+    thisNode.ThisToParentMatrix[0][3] =
+        (double)node->mTransformation.a4;
+    thisNode.ThisToParentMatrix[1][0] =
+        (double)node->mTransformation.b1;
+    thisNode.ThisToParentMatrix[1][1] =
+        (double)node->mTransformation.b2;
+    thisNode.ThisToParentMatrix[1][2] =
+        (double)node->mTransformation.b3;
+    thisNode.ThisToParentMatrix[1][3] =
+        (double)node->mTransformation.b4;
+    thisNode.ThisToParentMatrix[2][0] =
+        (double)node->mTransformation.c1;
+    thisNode.ThisToParentMatrix[2][1] =
+        (double)node->mTransformation.c2;
+    thisNode.ThisToParentMatrix[2][2] =
+        (double)node->mTransformation.c3;
+    thisNode.ThisToParentMatrix[2][3] =
+        (double)node->mTransformation.c4;
+    thisNode.ThisToParentMatrix[3][0] =
+        (double)node->mTransformation.d1;
+    thisNode.ThisToParentMatrix[3][1] =
+        (double)node->mTransformation.d2;
+    thisNode.ThisToParentMatrix[3][2] =
+        (double)node->mTransformation.d3;
+    thisNode.ThisToParentMatrix[3][3] =
+        (double)node->mTransformation.d4;
+
+    mNodes.emplace_back(thisNode);
+
     for (unsigned int i = 0; i < node->mNumMeshes; i++)
     {
         aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];

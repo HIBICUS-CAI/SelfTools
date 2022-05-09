@@ -7,6 +7,8 @@
 #include <assimp\scene.h>
 #include <assimp\postprocess.h>
 
+using MAT4x4D = std::array<std::array<double, 4>, 4>;
+
 struct MESH_VERTEX
 {
     std::array<double, 3> Position = { 0.0,0.0,0.0 };
@@ -38,8 +40,16 @@ struct MESH_BONE
     * 20 21 22 23
     * 30 31 32 33
     */
-    std::array<std::array<double, 4>, 4> LocalToBoneMatrix = { 0.0 };
+    MAT4x4D LocalToBoneMatrix = { 0.0 };
     std::vector<MESH_VERTEX_WEIGHT> VertexWeight = {};
+};
+
+struct SCENE_NODE
+{
+    std::string Name = "";
+    MAT4x4D ThisToParentMatrix = { 0.0 };
+    std::string ParentName = "";
+    std::vector<std::string> ChildrenName = {};
 };
 
 class SubMesh
@@ -98,6 +108,11 @@ public:
         return mDirectory;
     }
 
+    std::vector<SCENE_NODE>* GetNodeVec()
+    {
+        return &mNodes;
+    }
+
 private:
     void ProcessNode(
         aiNode* node, const aiScene* scene);
@@ -114,4 +129,5 @@ private:
     std::string mDirectory;
     std::vector<MESH_TEXTURE> mLoadedTexs;
     std::string mTextureType;
+    std::vector<SCENE_NODE> mNodes;
 };
