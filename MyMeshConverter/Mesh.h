@@ -52,6 +52,34 @@ struct SCENE_NODE
     std::vector<std::string> ChildrenName = {};
 };
 
+struct DOUBLE3_KEY
+{
+    double Time = 0.0;
+    std::array<double, 3> Value = { 0.0 };  // x, y, z
+};
+
+struct DOUBLE4_KEY
+{
+    double Time = 0.0;
+    std::array<double, 4> Value = { 0.0 };  // w, x, y, z
+};
+
+struct CHANNEL
+{
+    std::string NodeName = "";
+    std::vector<DOUBLE3_KEY> PositionKeys = {};
+    std::vector<DOUBLE4_KEY> RotationKeys = {};
+    std::vector<DOUBLE3_KEY> ScalingKeys = {};
+};
+
+struct ANIMATION
+{
+    std::string Name = "";
+    double Duration = 0.0;
+    double TicksPerSec = 0.0;
+    std::vector<CHANNEL> NodeActions = {};
+};
+
 class SubMesh
 {
 public:
@@ -113,6 +141,11 @@ public:
         return &mNodes;
     }
 
+    std::vector<ANIMATION>* GetAnimationVec()
+    {
+        return &mAnimations;
+    }
+
 private:
     void ProcessNode(
         aiNode* node, const aiScene* scene);
@@ -130,4 +163,5 @@ private:
     std::vector<MESH_TEXTURE> mLoadedTexs;
     std::string mTextureType;
     std::vector<SCENE_NODE> mNodes;
+    std::vector<ANIMATION> mAnimations;
 };

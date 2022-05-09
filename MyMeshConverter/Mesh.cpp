@@ -20,7 +20,7 @@ SubMesh::~SubMesh()
 Mesh::Mesh()
     :mSubMeshes({}), mLoadedTexs({}),
     mDirectory(""), mTextureType(""),
-    mNodes({})
+    mNodes({}), mAnimations({})
 {
 
 }
@@ -47,6 +47,74 @@ bool Mesh::Load(std::string fileName, unsigned int flag)
         0, fileName.find_last_of('/'));
 
     ProcessNode(pScene->mRootNode, pScene);
+
+    uint32_t aniSize = pScene->mNumAnimations;
+    auto aiAni = pScene->mAnimations;
+    if (aiAni)
+    {
+        mAnimations.resize(aniSize);
+        for (uint32_t i = 0; i < aniSize; i++)
+        {
+            auto& ani = mAnimations[i];
+            ani.Name = aiAni[i]->mName.C_Str();
+            ani.Duration = aiAni[i]->mDuration;
+            ani.TicksPerSec = aiAni[i]->mTicksPerSecond;
+            uint32_t chnlSize = aiAni[i]->mNumChannels;
+            ani.NodeActions.resize(chnlSize);
+            for (uint32_t j = 0; j < chnlSize; j++)
+            {
+                auto& chnl = ani.NodeActions[j];
+                auto aiChnl = aiAni[i]->mChannels[j];
+                chnl.NodeName = aiChnl->mNodeName.C_Str();
+
+                uint32_t keySize = 0;
+
+                keySize = aiChnl->mNumPositionKeys;
+                chnl.PositionKeys.resize(keySize);
+                for (uint32_t k = 0; k < keySize; k++)
+                {
+                    auto& posKey = chnl.PositionKeys[k];
+                    posKey.Time = aiChnl->mPositionKeys[k].mTime;
+                    posKey.Value[0] = 
+                        (double)aiChnl->mPositionKeys[k].mValue.x;
+                    posKey.Value[1] =
+                        (double)aiChnl->mPositionKeys[k].mValue.y;
+                    posKey.Value[2] =
+                        (double)aiChnl->mPositionKeys[k].mValue.z;
+                }
+
+                keySize = aiChnl->mNumRotationKeys;
+                chnl.RotationKeys.resize(keySize);
+                for (uint32_t k = 0; k < keySize; k++)
+                {
+                    auto& rotKey = chnl.RotationKeys[k];
+                    rotKey.Time = aiChnl->mRotationKeys[k].mTime;
+                    rotKey.Value[0] =
+                        (double)aiChnl->mRotationKeys[k].mValue.w;
+                    rotKey.Value[1] =
+                        (double)aiChnl->mRotationKeys[k].mValue.x;
+                    rotKey.Value[2] =
+                        (double)aiChnl->mRotationKeys[k].mValue.y;
+                    rotKey.Value[3] =
+                        (double)aiChnl->mRotationKeys[k].mValue.z;
+                }
+
+                keySize = aiChnl->mNumScalingKeys;
+                chnl.ScalingKeys.resize(keySize);
+                for (uint32_t k = 0; k < keySize; k++)
+                {
+                    auto& scaKey = chnl.ScalingKeys[k];
+                    scaKey.Time = aiChnl->mScalingKeys[k].mTime;
+                    scaKey.Value[0] =
+                        (double)aiChnl->mScalingKeys[k].mValue.x;
+                    scaKey.Value[1] =
+                        (double)aiChnl->mScalingKeys[k].mValue.y;
+                    scaKey.Value[2] =
+                        (double)aiChnl->mScalingKeys[k].mValue.z;
+                }
+            }
+        }
+    }
 
     return true;
 }
