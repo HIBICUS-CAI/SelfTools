@@ -13,6 +13,8 @@ struct MESH_VERTEX
     std::array<double, 3> Normal = { 0.0,0.0,0.0 };
     std::array<double, 3> Tangent = { 0.0,0.0,0.0 };
     std::array<double, 2> TexCoord = { 0.0,0.0 };
+    std::array<double, 4> Weight = { 0.0,0.0,0.0,0.0 };
+    std::array<uint32_t, 4> BoneID = { (uint32_t)-1,(uint32_t)-1,(uint32_t)-1,(uint32_t)-1 };
 };
 
 struct MESH_TEXTURE
@@ -21,13 +23,33 @@ struct MESH_TEXTURE
     std::string Path = "";
 };
 
+struct MESH_VERTEX_WEIGHT
+{
+    uint32_t VertexID = (uint32_t)-1;
+    double Weight = 0.0;
+};
+
+struct MESH_BONE
+{
+    std::string Name = "";
+    /* layout
+    * 00 01 02 03
+    * 10 11 12 13
+    * 20 21 22 23
+    * 30 31 32 33
+    */
+    std::array<std::array<double, 4>, 4> LocalToBoneMatrix = { 0.0 };
+    std::vector<MESH_VERTEX_WEIGHT> VertexWeight = {};
+};
+
 class SubMesh
 {
 public:
     SubMesh(
-        std::vector<MESH_VERTEX> vertices,
-        std::vector<unsigned int> indices,
-        std::vector<MESH_TEXTURE> textures);
+        std::vector<MESH_VERTEX>& _vertices,
+        std::vector<unsigned int>& _indices,
+        std::vector<MESH_TEXTURE>& _textures,
+        std::vector<MESH_BONE>& _bones);
 
     ~SubMesh();
 
@@ -50,6 +72,7 @@ private:
     std::vector<MESH_VERTEX> mVertices;
     std::vector<unsigned int> mIndices;
     std::vector<MESH_TEXTURE> mTextures;
+    std::vector<MESH_BONE> mBones;
 };
 
 class Mesh

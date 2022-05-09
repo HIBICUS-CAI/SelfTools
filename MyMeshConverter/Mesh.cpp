@@ -2,10 +2,12 @@
 #include <assert.h>
 
 SubMesh::SubMesh(
-    std::vector<MESH_VERTEX> vertices,
-    std::vector<unsigned int> indices,
-    std::vector<MESH_TEXTURE> textures)
-    :mVertices(vertices), mIndices(indices), mTextures(textures)
+    std::vector<MESH_VERTEX>& _vertices,
+    std::vector<unsigned int>& _indices,
+    std::vector<MESH_TEXTURE>& _textures,
+    std::vector<MESH_BONE>& _bones) :
+    mVertices(_vertices), mIndices(_indices), mTextures(_textures),
+    mBones(_bones)
 {
 
 }
@@ -69,6 +71,7 @@ SubMesh Mesh::ProcessSubMesh(
     std::vector<MESH_VERTEX> vertices;
     std::vector<unsigned int> indices;
     std::vector<MESH_TEXTURE> textures;
+    std::vector<MESH_BONE> bones;
 
     if (mesh->mMaterialIndex >= 0)
     {
@@ -126,7 +129,7 @@ SubMesh Mesh::ProcessSubMesh(
 
     if (mesh->mMaterialIndex >= 0)
     {
-        aiMaterial* material = 
+        aiMaterial* material =
             scene->mMaterials[mesh->mMaterialIndex];
 
         std::vector<MESH_TEXTURE> diffuseMaps =
@@ -137,7 +140,80 @@ SubMesh Mesh::ProcessSubMesh(
             diffuseMaps.begin(), diffuseMaps.end());
     }
 
-    return SubMesh(vertices, indices, textures);
+    if (mesh->HasBones())
+    {
+        bones.resize(mesh->mNumBones);
+        for (uint32_t i = 0, end = mesh->mNumBones; i < end; i++)
+        {
+            aiBone* pBone = mesh->mBones[i];
+
+            bones[i].Name = pBone->mName.C_Str();
+
+            bones[i].LocalToBoneMatrix[0][0] =
+                (double)pBone->mOffsetMatrix.a1;
+            bones[i].LocalToBoneMatrix[0][1] =
+                (double)pBone->mOffsetMatrix.a2;
+            bones[i].LocalToBoneMatrix[0][2] =
+                (double)pBone->mOffsetMatrix.a3;
+            bones[i].LocalToBoneMatrix[0][3] =
+                (double)pBone->mOffsetMatrix.a4;
+            bones[i].LocalToBoneMatrix[1][0] =
+                (double)pBone->mOffsetMatrix.b1;
+            bones[i].LocalToBoneMatrix[1][1] =
+                (double)pBone->mOffsetMatrix.b2;
+            bones[i].LocalToBoneMatrix[1][2] =
+                (double)pBone->mOffsetMatrix.b3;
+            bones[i].LocalToBoneMatrix[1][3] =
+                (double)pBone->mOffsetMatrix.b4;
+            bones[i].LocalToBoneMatrix[2][0] =
+                (double)pBone->mOffsetMatrix.c1;
+            bones[i].LocalToBoneMatrix[2][1] =
+                (double)pBone->mOffsetMatrix.c2;
+            bones[i].LocalToBoneMatrix[2][2] =
+                (double)pBone->mOffsetMatrix.c3;
+            bones[i].LocalToBoneMatrix[2][3] =
+                (double)pBone->mOffsetMatrix.c4;
+            bones[i].LocalToBoneMatrix[3][0] =
+                (double)pBone->mOffsetMatrix.d1;
+            bones[i].LocalToBoneMatrix[3][1] =
+                (double)pBone->mOffsetMatrix.d2;
+            bones[i].LocalToBoneMatrix[3][2] =
+                (double)pBone->mOffsetMatrix.d3;
+            bones[i].LocalToBoneMatrix[3][3] =
+                (double)pBone->mOffsetMatrix.d4;
+
+            bones[i].VertexWeight.resize(pBone->mNumWeights);
+            for (uint32_t end = pBone->mNumWeights, j = 0;
+                j < end; j++)
+            {
+                bones[i].VertexWeight[j].VertexID =
+                    pBone->mWeights[j].mVertexId;
+                bones[i].VertexWeight[j].Weight =
+                    (double)(pBone->mWeights[j].mWeight);
+            }
+        }
+
+        uint32_t boneID = 0;
+        for (auto& b : bones)
+        {
+            for (auto& id_weight : b.VertexWeight)
+            {
+                MESH_VERTEX& thisVert = vertices[id_weight.VertexID];
+                for (uint16_t i = 0; i < 4; i++)
+                {
+                    if (thisVert.Weight[i] < id_weight.Weight)
+                    {
+                        thisVert.Weight[i] = id_weight.Weight;
+                        thisVert.BoneID[i] = boneID;
+                        break;
+                    }
+                }
+            }
+            ++boneID;
+        }
+    }
+
+    return SubMesh(vertices, indices, textures, bones);
 }
 
 std::vector<MESH_TEXTURE> Mesh::LoadMaterialTextures(
