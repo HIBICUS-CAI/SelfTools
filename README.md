@@ -14,6 +14,16 @@
 - 使用assimp将模型转换为json或二进制meshdata文件
 - 可以传递特殊的处理flag
 
+### 需要添加的内容
+
+- 动画数据提取
+  - per scene
+    - all nodes
+    - node hierarchy
+    - all animations
+  - per mesh
+    - all bones
+
 ### 命令
       -type : file style to save info 
             json-pretty :   convert into formated json 
