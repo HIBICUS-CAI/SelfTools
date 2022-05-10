@@ -271,6 +271,82 @@ void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
             _writer->EndObject();
         }
         _writer->EndArray();
+
+        _writer->String("animation");
+        _writer->StartArray();
+        for (auto& ani : *(_mesh->GetAnimationVec()))
+        {
+            _writer->StartObject();
+            _writer->String("name");
+            _writer->String(ani.Name.c_str());
+            _writer->String("duration");
+            _writer->Double(ani.Duration);
+            _writer->String("ticks-per-second");
+            _writer->Double(ani.TicksPerSec);
+            _writer->String("node-actions");
+            _writer->StartArray();
+            for (auto& act : ani.NodeActions)
+            {
+                _writer->StartObject();
+                _writer->String("node-name");
+                _writer->String(act.NodeName.c_str());
+                _writer->String("position-keys");
+                _writer->StartArray();
+                for (auto& pk : act.PositionKeys)
+                {
+                    _writer->StartObject();
+                    _writer->String("time");
+                    _writer->Double(pk.Time);
+                    _writer->String("value");
+                    _writer->StartArray();
+                    for (UINT i = 0; i < 3; i++)
+                    {
+                        _writer->Double(pk.Value[i]);
+                    }
+                    _writer->EndArray();
+                    _writer->EndObject();
+                }
+                _writer->EndArray();
+                _writer->String("rotation-keys");
+                _writer->StartArray();
+                for (auto& rk : act.RotationKeys)
+                {
+                    _writer->StartObject();
+                    _writer->String("time");
+                    _writer->Double(rk.Time);
+                    _writer->String("value");
+                    _writer->StartArray();
+                    for (UINT i = 0; i < 4; i++)
+                    {
+                        _writer->Double(rk.Value[i]);
+                    }
+                    _writer->EndArray();
+                    _writer->EndObject();
+                }
+                _writer->EndArray();
+                _writer->String("scaling-keys");
+                _writer->StartArray();
+                for (auto& sk : act.ScalingKeys)
+                {
+                    _writer->StartObject();
+                    _writer->String("time");
+                    _writer->Double(sk.Time);
+                    _writer->String("value");
+                    _writer->StartArray();
+                    for (UINT i = 0; i < 3; i++)
+                    {
+                        _writer->Double(sk.Value[i]);
+                    }
+                    _writer->EndArray();
+                    _writer->EndObject();
+                }
+                _writer->EndArray();
+                _writer->EndObject();
+            }
+            _writer->EndArray();
+            _writer->EndObject();
+        }
+        _writer->EndArray();
     }
 
     _writer->EndObject();
