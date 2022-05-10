@@ -157,7 +157,7 @@ int main(int argc, char** argv)
             break;
         case CONVERT_TYPE::BINARY:
             p = file + ".meshdata";
-            SaveToFileBinary(p.c_str(), m);
+            SaveToFileBinary(p.c_str(), m, g_WithAnimation);
             break;
         default:
             break;

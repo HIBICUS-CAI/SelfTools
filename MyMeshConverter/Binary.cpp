@@ -3,7 +3,8 @@
 #include <fstream>
 #include <assert.h>
 
-void ProcessHeadInfo(std::ofstream* _file, Mesh* _mesh);
+void ProcessHeadInfo(std::ofstream* _file, Mesh* _mesh,
+    bool _withAnimation);
 
 void ProcessSubInfo(std::ofstream* _file, SubMesh* _submesh);
 
@@ -16,7 +17,8 @@ void ProcessSubVertex(std::ofstream* _file,
 void ProcessSubTexture(std::ofstream* _file,
     std::vector<MESH_TEXTURE>* _texture);
 
-void SaveToFileBinary(const char* _fileName, Mesh* _mesh)
+void SaveToFileBinary(const char* _fileName, Mesh* _mesh,
+    bool _withAnimation)
 {
     assert(_fileName);
     assert(_mesh);
@@ -24,7 +26,7 @@ void SaveToFileBinary(const char* _fileName, Mesh* _mesh)
     std::ofstream outFile(_fileName,
         std::ios::out | std::ios::binary);
 
-    ProcessHeadInfo(&outFile, _mesh);
+    ProcessHeadInfo(&outFile, _mesh, _withAnimation);
 
     for (auto& sub : *(_mesh->GetSubVec()))
     {
@@ -34,7 +36,8 @@ void SaveToFileBinary(const char* _fileName, Mesh* _mesh)
     outFile.close();
 }
 
-void ProcessHeadInfo(std::ofstream* _file, Mesh* _mesh)
+void ProcessHeadInfo(std::ofstream* _file, Mesh* _mesh,
+    bool _withAnimation)
 {
     assert(_file);
     assert(_mesh);
@@ -48,6 +51,10 @@ void ProcessHeadInfo(std::ofstream* _file, Mesh* _mesh)
     size = (int)_mesh->GetTextureType().length() + 1;
     _file->write((char*)&size, sizeof(size));
     _file->write(_mesh->GetTextureType().c_str(), size);
+
+    // with-animation
+    size = _withAnimation ? 1 : 0;
+    _file->write((char*)&size, sizeof(size));
 
     // sub-model-size
     size = (int)_mesh->GetSubVec()->size();
@@ -104,7 +111,7 @@ void ProcessSubVertex(std::ofstream* _file,
         // position
         for (int i = 0; i < 3; i++)
         {
-            _file->write((char*)&vert.Position[i], 
+            _file->write((char*)&vert.Position[i],
                 sizeof(double));
         }
 
