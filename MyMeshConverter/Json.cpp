@@ -202,6 +202,9 @@ void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
             _writer->String(texture.Type.c_str());
 
             _writer->String("path");
+            texture.Path.replace(texture.Path.find_last_of("."), 4, ".png");
+            texture.Path.replace(texture.Path.find_last_of("."), 4, ".png");
+            texture.Path.replace(texture.Path.find_last_of("."), 4, ".png");
             _writer->String(texture.Path.c_str());
 
             _writer->EndObject();
