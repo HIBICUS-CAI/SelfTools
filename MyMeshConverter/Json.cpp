@@ -16,7 +16,7 @@ using namespace rapidjson;
 static std::vector<StringBuffer*> g_Buffers = {};
 
 void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
-    Mesh* _mesh);
+    Mesh* _mesh, bool _withAnimation);
 
 void CreateStringBuffers(unsigned int _number)
 {
@@ -29,7 +29,8 @@ void CreateStringBuffers(unsigned int _number)
     }
 }
 
-void WriteInfoToBuffer(unsigned int _index, Mesh* _mesh)
+void WriteInfoToBuffer(unsigned int _index, Mesh* _mesh,
+    bool _withAnimation)
 {
     assert(_mesh);
 
@@ -38,7 +39,7 @@ void WriteInfoToBuffer(unsigned int _index, Mesh* _mesh)
     PrettyWriter<StringBuffer> writer(*buffer);
     writer.SetMaxDecimalPlaces(18);
 
-    ProcessMeshPretty(&writer, _mesh);
+    ProcessMeshPretty(&writer, _mesh, _withAnimation);
 
     assert(writer.IsComplete());
 }
@@ -96,7 +97,7 @@ void ClearUp()
 }
 
 void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
-    Mesh* _mesh)
+    Mesh* _mesh, bool _withAnimation)
 {
     _writer->StartObject();
 
@@ -104,6 +105,8 @@ void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
     _writer->String(_mesh->GetDirectory().c_str());
     _writer->String("texture-type");
     _writer->String(_mesh->GetTextureType().c_str());
+    _writer->String("with-animation");
+    _writer->Bool(_withAnimation);
 
     _writer->String("sub-model-size");
     _writer->Uint((unsigned int)(_mesh->GetSubVec()->size()));
@@ -166,6 +169,25 @@ void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
             }
             _writer->EndArray();
 
+            if (_withAnimation)
+            {
+                _writer->String("weight");
+                _writer->StartArray();
+                for (size_t i = 0; i < 4; i++)
+                {
+                    _writer->Double(vertex.Weight[i]);
+                }
+                _writer->EndArray();
+
+                _writer->String("boneid");
+                _writer->StartArray();
+                for (size_t i = 0; i < 4; i++)
+                {
+                    _writer->Uint(vertex.BoneID[i]);
+                }
+                _writer->EndArray();
+            }
+
             _writer->EndObject();
         }
         _writer->EndArray();
@@ -186,10 +208,70 @@ void ProcessMeshPretty(PrettyWriter<StringBuffer>* _writer,
         }
         _writer->EndArray();
 
+        if (_withAnimation)
+        {
+            _writer->String("bone");
+            _writer->StartArray();
+            for (auto& bone : *(sub.GetBoneVec()))
+            {
+                _writer->StartObject();
+
+                _writer->String("name");
+                _writer->String(bone.Name.c_str());
+
+                _writer->String("to-bone");
+                _writer->StartArray();
+                for (UINT i = 0; i < 4; i++)
+                {
+                    for (UINT j = 0; j < 4; j++)
+                    {
+                        _writer->Double(bone.LocalToBoneMatrix[i][j]);
+                    }
+                }
+                _writer->EndArray();
+
+                _writer->EndObject();
+            }
+            _writer->EndArray();
+        }
+
         _writer->EndObject();
     }
 
     _writer->EndArray();
+
+    if (_withAnimation)
+    {
+        _writer->String("node-relationship");
+        _writer->StartArray();
+        for (auto& node : *(_mesh->GetNodeVec()))
+        {
+            _writer->StartObject();
+            _writer->String("name");
+            _writer->String(node.Name.c_str());
+            _writer->String("to-parent");
+            _writer->StartArray();
+            for (UINT i = 0; i < 4; i++)
+            {
+                for (UINT j = 0; j < 4; j++)
+                {
+                    _writer->Double(node.ThisToParentMatrix[i][j]);
+                }
+            }
+            _writer->EndArray();
+            _writer->String("parent");
+            _writer->String(node.ParentName.c_str());
+            _writer->String("children");
+            _writer->StartArray();
+            for (auto& childName : node.ChildrenName)
+            {
+                _writer->String(childName.c_str());
+            }
+            _writer->EndArray();
+            _writer->EndObject();
+        }
+        _writer->EndArray();
+    }
 
     _writer->EndObject();
 }

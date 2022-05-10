@@ -106,6 +106,11 @@ public:
         return &mTextures;
     }
 
+    std::vector<MESH_BONE>* GetBoneVec()
+    {
+        return &mBones;
+    }
+
 private:
     std::vector<MESH_VERTEX> mVertices;
     std::vector<unsigned int> mIndices;

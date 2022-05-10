@@ -15,6 +15,7 @@ enum class CONVERT_TYPE
 
 CONVERT_TYPE g_ConvertType = CONVERT_TYPE::JSON_NORMAL;
 unsigned int g_ProcessFlag = 0;
+bool g_WithAnimation = false;
 std::vector<std::string> g_InputFiles = {};
 
 int main(int argc, char** argv)
@@ -36,9 +37,10 @@ int main(int argc, char** argv)
             "\n  -flag : the flag pass to assimp to process mesh\n"\
             "\tleft-hand : \tprocess mesh to LH coord\n"\
             "\tright-hand : \tprocess mesh to RH coord\n"\
+            "\tanimation : \tprocess mesh's animation\n"\
             "\toptimize : \tprocess with optimzie flag\n"\
             "\n  -input : the model file you want to convert\n"\
-            "\t[file name] : \tthe file's name without path\n";
+            "\t[file name] : \tthe file's name with path\n";
         std::cout << helpInfo << std::endl;
         return 0;
     }
@@ -94,6 +96,10 @@ int main(int argc, char** argv)
                     {
                         continue;
                     }
+                    else if (flag == "animation")
+                    {
+                        g_WithAnimation = true;
+                    }
                     else if (flag == "optimize")
                     {
                         g_ProcessFlag |=
@@ -138,7 +144,7 @@ int main(int argc, char** argv)
     {
         Mesh* m = new Mesh;
         m->Load(file, g_ProcessFlag);
-        WriteInfoToBuffer(index, m);
+        WriteInfoToBuffer(index, m, g_WithAnimation);
         switch (g_ConvertType)
         {
         case CONVERT_TYPE::JSON_PRETTY:
