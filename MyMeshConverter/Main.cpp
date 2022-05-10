@@ -144,15 +144,16 @@ int main(int argc, char** argv)
     {
         Mesh* m = new Mesh;
         m->Load(file, g_ProcessFlag);
-        WriteInfoToBuffer(index, m, g_WithAnimation);
         switch (g_ConvertType)
         {
         case CONVERT_TYPE::JSON_PRETTY:
             p = file + ".json";
+            WriteInfoToBuffer(index, m, g_WithAnimation);
             SaveToFilePretty(p.c_str(), index);
             break;
         case CONVERT_TYPE::JSON_NORMAL:
             p = file + ".json";
+            WriteInfoToBuffer(index, m, g_WithAnimation);
             SaveToFileNormal(p.c_str(), index);
             break;
         case CONVERT_TYPE::BINARY:
