@@ -89,8 +89,7 @@ int main(int argc, char** argv)
                     }
                     if (flag == "left-hand")
                     {
-                        g_ProcessFlag |=
-                            aiProcess_ConvertToLeftHanded;
+                        g_ProcessFlag |= aiProcess_ConvertToLeftHanded;
                     }
                     else if (flag == "right-hand")
                     {
@@ -99,6 +98,7 @@ int main(int argc, char** argv)
                     else if (flag == "animation")
                     {
                         g_WithAnimation = true;
+                        g_ProcessFlag |= aiProcess_LimitBoneWeights;
                     }
                     else if (flag == "optimize")
                     {

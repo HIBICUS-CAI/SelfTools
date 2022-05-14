@@ -316,7 +316,7 @@ SubMesh Mesh::ProcessSubMesh(
                 MESH_VERTEX& thisVert = vertices[id_weight.VertexID];
                 for (uint16_t i = 0; i < 4; i++)
                 {
-                    if (thisVert.Weight[i] < id_weight.Weight)
+                    if (thisVert.Weight[i] == 0.0)
                     {
                         thisVert.Weight[i] = id_weight.Weight;
                         thisVert.BoneID[i] = boneID;
