@@ -90,13 +90,13 @@ bool Mesh::Load(std::string fileName, unsigned int flag)
                     auto& rotKey = chnl.RotationKeys[k];
                     rotKey.Time = aiChnl->mRotationKeys[k].mTime;
                     rotKey.Value[0] =
-                        (double)aiChnl->mRotationKeys[k].mValue.w;
-                    rotKey.Value[1] =
                         (double)aiChnl->mRotationKeys[k].mValue.x;
-                    rotKey.Value[2] =
+                    rotKey.Value[1] =
                         (double)aiChnl->mRotationKeys[k].mValue.y;
-                    rotKey.Value[3] =
+                    rotKey.Value[2] =
                         (double)aiChnl->mRotationKeys[k].mValue.z;
+                    rotKey.Value[3] =
+                        (double)aiChnl->mRotationKeys[k].mValue.w;
                 }
 
                 keySize = aiChnl->mNumScalingKeys;
