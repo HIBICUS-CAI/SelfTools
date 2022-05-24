@@ -39,15 +39,15 @@ void SaveToFileBinary(const char* _fileName, Mesh* _mesh,
 
     ProcessHeadInfo(&outFile, _mesh, _withAnimation);
 
-    for (auto& sub : *(_mesh->GetSubVec()))
-    {
-        ProcessSubInfo(&outFile, &sub, _withAnimation);
-    }
-
     if (_withAnimation)
     {
         ProcessSceneNodes(&outFile, _mesh->GetNodeVec());
         ProcessAnimations(&outFile, _mesh->GetAnimationVec());
+    }
+
+    for (auto& sub : *(_mesh->GetSubVec()))
+    {
+        ProcessSubInfo(&outFile, &sub, _withAnimation);
     }
 
     outFile.close();
