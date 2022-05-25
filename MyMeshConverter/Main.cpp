@@ -163,6 +163,7 @@ int main(int argc, char** argv)
         default:
             break;
         }
+        m->ProcessMetaInfo(file + ".meta.txt", g_WithAnimation);
         delete m;
 
         ++index;

@@ -1,5 +1,8 @@
 #include "Mesh.h"
 #include <assert.h>
+#include <fstream>
+
+#define STR std::to_string
 
 SubMesh::SubMesh(
     std::vector<MESH_VERTEX>& _vertices,
@@ -75,7 +78,7 @@ bool Mesh::Load(std::string fileName, unsigned int flag)
                 {
                     auto& posKey = chnl.PositionKeys[k];
                     posKey.Time = aiChnl->mPositionKeys[k].mTime;
-                    posKey.Value[0] = 
+                    posKey.Value[0] =
                         (double)aiChnl->mPositionKeys[k].mValue.x;
                     posKey.Value[1] =
                         (double)aiChnl->mPositionKeys[k].mValue.y;
@@ -406,4 +409,43 @@ int Mesh::GetTextureIndex(aiString* str)
     tistr = str->C_Str();
     tistr = tistr.substr(1);
     return stoi(tistr);
+}
+
+void Mesh::ProcessMetaInfo(std::string filePath, bool animated)
+{
+    std::string metaInfo = "";
+
+    metaInfo += "----------------------------------------------\n";
+    metaInfo += "directory : [[" + mDirectory + "]]\n";
+    metaInfo += "----------------------------------------------\n";
+    metaInfo += "sub mesh size : [[" + STR(mSubMeshes.size()) + "]]\n";
+    for (auto& sub : mSubMeshes)
+    {
+        metaInfo += "\t------------------------------------------\n";
+        metaInfo += "\tindex size : [[" + STR(sub.GetIndexVec()->size()) + "]]\t";
+        metaInfo += "\tvertex size : [[" + STR(sub.GetVertexVec()->size()) + "]]\n";
+        auto texV = sub.GetTextureVec();
+        for (auto& t : *texV)
+        {
+            metaInfo += "\t" + t.Type + " : [[" + t.Path + "]]\n";
+        }
+    }
+    metaInfo += "----------------------------------------------\n";
+    metaInfo += animated ? "animated : [[Yes]]\n" : "animated : [[No]]\n";
+    if (animated)
+    {
+        for (auto& ani : mAnimations)
+        {
+            metaInfo += "\t------------------------------------------\n";
+            std::string time = STR(ani.Duration / ani.TicksPerSec);
+            std::string& name = ani.Name;
+            metaInfo += "\tduration : [[" + time + "s]]\t" +
+                "name : [[" + name + "]]\n";
+        }
+    }
+    metaInfo += "----------------------------------------------\n";
+
+    std::ofstream metaFile(filePath);
+    metaFile << metaInfo;
+    metaFile.close();
 }

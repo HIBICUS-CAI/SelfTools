@@ -126,6 +126,8 @@ public:
 
     bool Load(std::string fileName, unsigned int flag);
 
+    void ProcessMetaInfo(std::string filePath, bool animated);
+
     std::vector<SubMesh>* GetSubVec()
     {
         return &mSubMeshes;
