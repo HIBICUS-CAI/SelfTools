@@ -1,4 +1,3 @@
-from genericpath import isdir
 import sys
 import os
 import re
