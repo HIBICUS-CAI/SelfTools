@@ -34,6 +34,16 @@ def convert_file(in_path: str, out_path: str):
         else:
             block.insert(0, "&markdown_block_start{{\n")
             block.append("}}\n" if block[-1].endswith("\n") else "\n}}")
+            i = 0
+            is_now_fswiki = False
+            while i < len(block):
+                if block[i] == "```fswiki\n":
+                    block[i] = "}}\n\n"
+                    is_now_fswiki = True
+                elif block[i] == "```\n" and is_now_fswiki:
+                    block[i] = "\n&markdown_block_start{{\n"
+                    is_now_fswiki = False
+                i += 1
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, 'w', encoding="utf-8") as output:
