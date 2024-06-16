@@ -1,6 +1,7 @@
 from genericpath import isdir
 import sys
 import os
+import re
 
 def convert_file(in_path: str, out_path: str):
     print(in_path)
@@ -26,9 +27,13 @@ def convert_file(in_path: str, out_path: str):
     for block in all_blocks:
         if len(block) == 1 and block[0].startswith(convert_md_title):
             block[0] = block[0][block[0].index(' '):].rjust(len(block[0]), '*')
+            title_hash_pattern = re.compile(r"^.*<!--hash:(?P<hash>.*)-->\n$")
+            search_title_hash = re.search(title_hash_pattern, block[0])
+            if search_title_hash is not None:
+                block[0] = block[0][:block[0].index("<!--hash:")] + "[#{}]".format(search_title_hash.group("hash")) + "\n"
         else:
             block.insert(0, "&markdown_block_start{{\n")
-            block.append("}}\n")
+            block.append("}}\n" if block[-1].endswith("\n") else "\n}}")
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, 'w', encoding="utf-8") as output:
