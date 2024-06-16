@@ -1,33 +1,56 @@
+from genericpath import isdir
 import sys
+import os
 
-with open(sys.argv[1], 'r', encoding="utf-8") as f:
-    lines = f.readlines()
+def convert_file(in_path: str, out_path: str):
+    print(in_path)
+    print("↓...")
+    print(out_path)
 
-all_blocks = [[]]
-all_blocks.clear()
+    with open(in_path, 'r', encoding="utf-8") as f:
+        lines = f.readlines()
 
-convert_md_title = ("# ", "## ", "### ")
+    all_blocks = []
 
-i = 0
-while i < len(lines):
-    all_blocks.append([lines[i]])
-    if not lines[i].startswith(convert_md_title):
-        while len(lines) > (i + 1) and not lines[i + 1].startswith(convert_md_title):
-            i += 1
-            all_blocks[-1].append(lines[i])
-    i += 1
+    convert_md_title = ("# ", "## ", "### ")
 
-for block in all_blocks:
-    if len(block) == 1 and block[0].startswith(convert_md_title):
-        block[0] = block[0][block[0].index(' '):].rjust(len(block[0]), '*')
-        print(block[0].rstrip())
-    else:
-        block.insert(0, "&markdown_block_start{{\n")
-        block.append("}}\n")
-        for text in block:
-            print(text.rstrip())
+    i = 0
+    while i < len(lines):
+        all_blocks.append([lines[i]])
+        if not lines[i].startswith(convert_md_title):
+            while len(lines) > (i + 1) and not lines[i + 1].startswith(convert_md_title):
+                i += 1
+                all_blocks[-1].append(lines[i])
+        i += 1
 
-with open("D:\code\SelfTools\md2wiki\somefile.txt", 'w', encoding="utf-8") as output:
     for block in all_blocks:
-        for line in block:
-            output.write(line)
+        if len(block) == 1 and block[0].startswith(convert_md_title):
+            block[0] = block[0][block[0].index(' '):].rjust(len(block[0]), '*')
+        else:
+            block.insert(0, "&markdown_block_start{{\n")
+            block.append("}}\n")
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'w', encoding="utf-8") as output:
+        for block in all_blocks:
+            for line in block:
+                output.write(line)
+
+    print("done.")
+
+def convert_dir(in_path: str):
+    all_md_files = []
+    for path, subdirs, files in os.walk(in_path):
+        md_list = (name for name in files if name.endswith(".md"))
+        for name in md_list:
+            all_md_files.append(os.path.join(path, name))
+
+    for md_path in all_md_files:
+        out_path = os.path.join(in_path, "OUT_MD2WIKI", md_path[len(in_path):]) + ".2wiki.txt"
+        convert_file(md_path, out_path)
+        
+in_path = sys.argv[1]
+if os.path.isdir(in_path):
+    convert_dir(os.path.join(os.path.abspath(in_path), ''))
+elif in_path.endswith(".md"):
+    convert_file(in_path, in_path + ".2wiki.txt")
