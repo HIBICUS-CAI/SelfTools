@@ -13,6 +13,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Chat_Server", "Chat_Server\
 EndProject
 Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "md2wiki", "md2wiki\md2wiki.pyproj", "{C1A7C655-8219-498E-8288-DA4CC6A06D90}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hider", "Hider\Hider.csproj", "{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -77,6 +79,18 @@ Global
 		{C1A7C655-8219-498E-8288-DA4CC6A06D90}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C1A7C655-8219-498E-8288-DA4CC6A06D90}.Release|x64.ActiveCfg = Release|Any CPU
 		{C1A7C655-8219-498E-8288-DA4CC6A06D90}.Release|x86.ActiveCfg = Release|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Debug|x64.Build.0 = Debug|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Debug|x86.Build.0 = Debug|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Release|x64.ActiveCfg = Release|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Release|x64.Build.0 = Release|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Release|x86.ActiveCfg = Release|Any CPU
+		{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
