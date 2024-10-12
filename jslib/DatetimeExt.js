@@ -26,11 +26,9 @@ class DatetimeExt extends Date {
      * @returns ®Œ`Ï‚Ý‚Ì•¶Žš—ñ
      */
     formatLocale(pattern) {
-        let result = pattern;
-
-        function padOrCut(origin, demandLength, doseCut = false) {
+        const padOrCut = (origin, demandLength, doseCut = false) => {
             let result = origin.toString();
-            let resultLength = result.length;
+            const resultLength = result.length;
             if (doseCut && resultLength > demandLength) {
                 result = result.slice(resultLength - demandLength);
             } else if (resultLength < demandLength) {
@@ -41,14 +39,13 @@ class DatetimeExt extends Date {
             return result;
         }
 
-        result = result
+        return pattern
             .replace(/(y+)/g, hit => padOrCut(super.getFullYear(), hit.length, true))
             .replace(/(M+)/g, hit => padOrCut(super.getMonth() + 1, hit.length))
             .replace(/(d+)/g, hit => padOrCut(super.getDate(), hit.length))
             .replace(/([Hh]+)/g, hit => padOrCut(super.getHours(), hit.length))
             .replace(/(m+)/g, hit => padOrCut(super.getMinutes(), hit.length))
             .replace(/(s+)/g, hit => padOrCut(super.getSeconds(), hit.length));
-        return result;
     }
 
     /**
