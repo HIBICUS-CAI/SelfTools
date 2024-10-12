@@ -29,7 +29,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="app.js" />
-    <Content Include="FormattableDatetime.js" />
+    <Content Include="DatetimeExt.js" />
     <Content Include="package.json" />
     <Content Include="README.md" />
   </ItemGroup>

@@ -1,7 +1,7 @@
 /**
- * 日時整形用のクラス
+ * 日時拡張クラス
  */
-class FormattableDatetime extends Date {
+class DatetimeExt extends Date {
     /**
      * コンストラクタ
      * @param  {...any} args Dateのコンストラクタに渡せるもの
@@ -56,7 +56,7 @@ class FormattableDatetime extends Date {
      * @returns 整形済みの文字列
      */
     formatLocaleStandard() {
-        return this.formatLocale('yyyy/MM/dd HH:mm:ss')
+        return this.formatLocale('yyyy/MM/dd HH:mm:ss');
     }
 
     /**
@@ -66,8 +66,64 @@ class FormattableDatetime extends Date {
     formatLocaleForPath() {
         return this.formatLocale('yyyy-MM-dd_HH-mm-ss');
     }
+
+    /**
+     * 指定した年数を増やす
+     * @param {number} years 増加年数
+     */
+    addYears(years) {
+        super.setFullYear(super.getFullYear() + years);
+    }
+
+    /**
+     * 指定した月数を増やす
+     * @param {number} months 増加月数
+     */
+    addMonths(months) {
+        super.setMonth(super.getMonth() + months);
+    }
+
+    /**
+     * 指定した日数を増やす
+     * @param {number} days 増加日数
+     */
+    addDays(days) {
+        super.setDate(super.getDate() + days);
+    }
+
+    /**
+     * 指定した時間分を増やす
+     * @param {number} hours 増加時間
+     */
+    addHours(hours) {
+        super.setHours(super.getHours() + hours);
+    }
+
+    /**
+     * 指定した分数を増やす
+     * @param {number} minutes 増加分
+     */
+    addMinutes(minutes) {
+        super.setMinutes(super.getMinutes() + minutes);
+    }
+
+    /**
+     * 指定した秒数を増やす
+     * @param {number} seconds 増加秒
+     */
+    addSeconds(seconds) {
+        super.setSeconds(super.getSeconds() + seconds);
+    }
+
+    /**
+     * 指定したミリ秒数を増やす
+     * @param {number} milliSeconds 増加ミリ秒
+     */
+    addMilliSeconds(milliSeconds) {
+        super.setMilliseconds(super.getMilliseconds() + milliSeconds);
+    }
 }
 
 module.exports = {
-    FormattableDatetime
-}
+    DatetimeExt
+};
