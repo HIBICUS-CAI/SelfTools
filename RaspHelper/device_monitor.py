@@ -14,6 +14,12 @@ def cap(patter: str, content: str, group_index: int=None) -> str:
 		group_index = 1
 	return result.group(group_index)
 
+fan_rpm_file = ''
+for i in range(0, 5):
+	fan_rpm_file = f'/sys/devices/platform/cooling_fan/hwmon/hwmon{i}/fan1_input'
+	if os.path.isfile(fan_rpm_file):
+		break
+
 try:
 	while True:
 		base_args = 'vcgencmd'
@@ -43,7 +49,7 @@ try:
 		]
 
 		fan_rpm = 0
-		with open('/sys/devices/platform/cooling_fan/hwmon/hwmon2/fan1_input') as f:
+		with open(fan_rpm_file) as f:
 			fan_rpm = f.read().rstrip()
 
 		msg = f'''
