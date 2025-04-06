@@ -1,3 +1,5 @@
+touch /home/hibic/.zshrc
+
 sh -c "$(wget https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -O -)"
 
 echo 'export DOTNET_ROOT=$HOME/.dotnet' >> /home/hibic/.zshrc
