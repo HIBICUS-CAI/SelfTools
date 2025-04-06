@@ -17,5 +17,5 @@ echo ping finished
 
 :setup
 ssh-keygen -R raspberrypi5.local
-scp %~dp0setup.sh hibic@raspberrypi5.local:~/
-ssh hibic@raspberrypi5.local mkdir ~/temp; mv -f -v ~/setup.sh ~/temp/; bash ./temp/setup.sh
+scp -i ~/.ssh/id_ed25519 %~dp0setup.sh hibic@raspberrypi5.local:~/
+ssh -i ~/.ssh/id_ed25519 hibic@raspberrypi5.local mkdir ~/temp; mv -f -v ~/setup.sh ~/temp/; bash ./temp/setup.sh
