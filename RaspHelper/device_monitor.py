@@ -8,8 +8,8 @@ def sout(*args) -> str:
 	(_, stdout, _) = sys(list(args))
 	return '\n'.join(stdout)
 
-def cap(patter: str, content: str, group_index: int=None) -> str:
-	result = re.compile(patter).search(content)
+def cap(pattern: str, content: str, group_index: int=None) -> str:
+	result = re.compile(pattern).search(content)
 	if group_index == None:
 		group_index = 1
 	return result.group(group_index)
