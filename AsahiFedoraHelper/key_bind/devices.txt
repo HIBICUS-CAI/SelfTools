@@ -1,0 +1,16 @@
+Name: Apple MTP keyboard
+Path: /dev/input/event1
+Phys: 24eb30000.input.2 (keyboard)
+
+Name: Apple MTP multi-touch
+Path: /dev/input/event0
+Phys: 24eb30000.input.1 (multi-touch)
+
+Name: Apple SMC power/lid events
+Path: /dev/input/event2
+Phys: macsmc-hid (0)
+
+Name: MacBook Air J413 Headphone Jack
+Path: /dev/input/event3
+Phys: ALSA
+

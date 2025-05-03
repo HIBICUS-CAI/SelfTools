@@ -1,0 +1,25 @@
+device_name = "Apple MTP keyboard"
+
+[[remap]]
+input = ["KEY_CAPSLOCK"]
+output = ["KEY_LEFTCTRL"]
+
+[[remap]]
+input = ["KEY_LEFTCTRL"]
+output = ["KEY_CAPSLOCK"]
+
+[[remap]]
+input = ["KEY_LEFTMETA"]
+output = ["KEY_LEFTALT"]
+
+[[remap]]
+input = ["KEY_LEFTALT"]
+output = ["KEY_LEFTMETA"]
+
+[[remap]]
+input = ["KEY_RIGHTMETA"]
+output = ["KEY_RIGHTALT"]
+
+[[remap]]
+input = ["KEY_RIGHTALT"]
+output = ["KEY_RIGHTMETA"]
