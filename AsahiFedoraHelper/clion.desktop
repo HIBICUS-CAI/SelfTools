@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Clion
+Comment=Cross Platform C++ IDE.
+GenericName=IDE
+Exec=/home/hibic/app/clion-2025.2.1/bin/clion
+Icon=/home/hibic/app/clion-2025.2.1/bin/clion.png
+Type=Application
+StartupNotify=false
+Categories=TextEditor;Development;IDE;
+Keywords=clion;
