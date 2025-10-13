@@ -1,0 +1,21 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Chat_Client/Chat_Client.vcxproj" Id="5f96ac26-6ac2-4cd3-a939-1062db19f23d" />
+  <Project Path="Chat_Server/Chat_Server.csproj" />
+  <Project Path="EncodeConverter/EncodeConverter.csproj" />
+  <Project Path="Hider/Hider.csproj" />
+  <Project Path="jslib/jslib.njsproj" Id="0acce956-b92a-4331-ae7f-617f350d1692">
+    <Platform Project="AnyCPU" />
+    <Build />
+  </Project>
+  <Project Path="LocalTransfer/LocalTransfer.csproj" />
+  <Project Path="md2wiki/md2wiki.pyproj" Type="888888a0-9f3d-457c-b088-3a5042f75d52" Id="c1a7c655-8219-498e-8288-da4cc6a06d90">
+    <Platform Project="AnyCPU" />
+    <Build Project="false" />
+  </Project>
+  <Project Path="MyMeshConverter/MyMeshConverter.vcxproj" Id="68ffe286-d5f5-4299-b3dc-1967dbcae75e" />
+</Solution>
