@@ -40,12 +40,12 @@ popd
 echo Backing up local files...
 pushd %BACKUP_DIR%\local
 xcopy /e /y C:\Users\%USERNAME%\.ssh\ .\ssh_backup\
-xcopy /e /y C:\Users\%USERNAME%\.ssh\ .\ssh_backup\
 copy C:\Users\%USERNAME%\Documents\PowerShell\Microsoft.PowerShell_profile.ps1 .\Microsoft.PowerShell_profile.ps1.backup
 copy C:\Users\%USERNAME%\AppData\Roaming\Code\User\settings.json .\vscode_settings.json.backup
 copy C:\Users\%USERNAME%\AppData\Local\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json .\windows_terminal_settings.json.backup
 xcopy /e /y D:\doc\ .\doc_backup\
 xcopy /e /y D:\scripts\ .\scripts_backup\
+xcopy /e /y D:\doc\personal\onedrive_personal .\onedrive_personal_backup\
 popd
 
 pushd %BACKUP_ROOT_DIR%
