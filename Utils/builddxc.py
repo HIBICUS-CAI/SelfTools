@@ -88,7 +88,7 @@ shutil.copyfile(
 )
 shutil.copytree(
     os.path.join(source_dir, 'tools', 'clang', 'lib', 'Headers', 'hlsl'),
-    os.path.join(build_dir, 'header_install', 'include', 'dxc', 'hlsl'),
+    os.path.join(build_dir, 'header_install', 'include', 'hlsl'),
 )
 
 print('Copying built DXC binaries to dxc_dist directory...')
