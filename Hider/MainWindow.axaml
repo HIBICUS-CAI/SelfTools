@@ -1,0 +1,8 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Hider.MainWindow"
+        Title=""
+        CanMinimize="False"
+        CanMaximize="False"
+        Background="#68768A"
+        Width="800" Height="450" />
