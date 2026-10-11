@@ -24,6 +24,11 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Used by the Linux desktop entry written by scripts/install.py. -->
+    <None Update="Assets/hider.svg" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- SkiaSharp/HarfBuzzSharp ship ~100MB of native .pdb files for Windows; they are useless to end users. -->
   <Target Name="RemoveNativePdbFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>

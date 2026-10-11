@@ -47,11 +47,16 @@ def install_windows(dest_dir):
         sys.exit('Failed to create the desktop shortcut.')
 
 
+def desktop_string(value):
+    # Desktop Entry spec escape rule for string values.
+    return value.replace('\\', '\\\\')
+
+
 def desktop_exec_arg(path):
-    # Desktop Entry spec: quote the argument and backslash-escape " ` $ \ inside it, then escape
-    # backslashes again for the string value, and double % so it is not read as a field code.
+    # Desktop Entry spec: quote the argument and backslash-escape " ` $ \ inside it, apply the string
+    # escape rule on top, and double % so it is not read as a field code.
     quoted = '"' + re.sub(r'(["`$\\])', r'\\\1', path) + '"'
-    return quoted.replace('\\', '\\\\').replace('%', '%%')
+    return desktop_string(quoted).replace('%', '%%')
 
 
 def install_linux(dest_dir, data_home):
@@ -70,6 +75,7 @@ def install_linux(dest_dir, data_home):
             'Name=Hider',
             'Comment=Cover part of the screen with a plain window',
             f'Exec={desktop_exec_arg(exe_path)}',
+            f'Icon={desktop_string(os.path.join(dest_dir, "Assets", "hider.svg"))}',
             'Terminal=false',
             'Categories=Utility;',
             'StartupWMClass=Hider',
