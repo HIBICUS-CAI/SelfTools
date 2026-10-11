@@ -1,8 +1,9 @@
-import argparse, base64, os, platform, shutil, subprocess, sys
+import argparse, base64, os, platform, re, shutil, subprocess, sys
 from common import TARGETS, host_target, publish_dir
 
 parser = argparse.ArgumentParser(description='Install the published Hider for the current machine (overwrites existing files).')
-parser.add_argument('-d', '--dest', help='Install folder. Default: %%LOCALAPPDATA%%\\Programs\\Hider on Windows.')
+parser.add_argument('-d', '--dest', help='Install folder. Default: %%LOCALAPPDATA%%\\Programs\\Hider on Windows, '
+                                         '$XDG_DATA_HOME/Hider (~/.local/share/Hider) on Linux.')
 args = parser.parse_args()
 
 target = host_target()
@@ -46,10 +47,43 @@ def install_windows(dest_dir):
         sys.exit('Failed to create the desktop shortcut.')
 
 
+def desktop_exec_arg(path):
+    # Desktop Entry spec: quote the argument and backslash-escape " ` $ \ inside it, then escape
+    # backslashes again for the string value, and double % so it is not read as a field code.
+    quoted = '"' + re.sub(r'(["`$\\])', r'\\\1', path) + '"'
+    return quoted.replace('\\', '\\\\').replace('%', '%%')
+
+
+def install_linux(dest_dir, data_home):
+    copy_files(dest_dir)
+    exe_path = os.path.join(dest_dir, exe_name)
+    os.chmod(exe_path, 0o755)
+    # A desktop entry makes Hider searchable from the Super key and pinnable to the dock.
+    # StartupWMClass matches the WM_CLASS set in Program.cs so the running window groups with the pin.
+    apps_dir = os.path.join(data_home, 'applications')
+    os.makedirs(apps_dir, exist_ok=True)
+    entry_path = os.path.join(apps_dir, 'Hider.desktop')
+    with open(entry_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join([
+            '[Desktop Entry]',
+            'Type=Application',
+            'Name=Hider',
+            'Comment=Cover part of the screen with a plain window',
+            f'Exec={desktop_exec_arg(exe_path)}',
+            'Terminal=false',
+            'Categories=Utility;',
+            'StartupWMClass=Hider',
+            '',
+        ]))
+    print(f'Created desktop entry: {entry_path}')
+
+
 if is_windows:
     dest = os.path.abspath(args.dest or os.path.join(os.environ['LOCALAPPDATA'], 'Programs', 'Hider'))
     install_windows(dest)
 else:
-    sys.exit('Installing on this OS is not supported yet.')
+    data_home = os.environ.get('XDG_DATA_HOME') or os.path.join(os.path.expanduser('~'), '.local', 'share')
+    dest = os.path.abspath(args.dest or os.path.join(data_home, 'Hider'))
+    install_linux(dest, data_home)
 
 print(f'Installed to {dest}')
