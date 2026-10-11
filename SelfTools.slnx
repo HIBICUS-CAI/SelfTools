@@ -7,7 +7,7 @@
   <Project Path="Chat_Client/Chat_Client.vcxproj" Id="5f96ac26-6ac2-4cd3-a939-1062db19f23d" />
   <Project Path="Chat_Server/Chat_Server.csproj" />
   <Project Path="EncodeConverter/EncodeConverter.csproj" />
-  <Project Path="Hider/Hider.csproj" />
+  <Project Path="Hider_Wpf/Hider_Wpf.csproj" />
   <Project Path="jslib/jslib.njsproj" Id="0acce956-b92a-4331-ae7f-617f350d1692">
     <Platform Project="AnyCPU" />
     <Build />

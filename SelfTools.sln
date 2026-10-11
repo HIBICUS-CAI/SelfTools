@@ -13,7 +13,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Chat_Server", "Chat_Server\
 EndProject
 Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "md2wiki", "md2wiki\md2wiki.pyproj", "{C1A7C655-8219-498E-8288-DA4CC6A06D90}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hider", "Hider\Hider.csproj", "{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hider_Wpf", "Hider_Wpf\Hider_Wpf.csproj", "{DA4E51EB-D0ED-422E-A1FD-C169B824F4E2}"
 EndProject
 Project("{9092AA53-FB77-4645-B42D-1CCCA6BD08BD}") = "jslib", "jslib\jslib.njsproj", "{0ACCE956-B92A-4331-AE7F-617F350D1692}"
 EndProject
