@@ -27,9 +27,14 @@ PowerToys Run の「VS Code Workspaces」プラグイン（アクションキー
 | 選択履歴 | PowerToys Run 全体で共有 | 本拡張専用（`LocalState\UserSelectedRecord.json`） |
 | 表示言語 | PowerToys の翻訳版 | 英語のみ（`Properties/Resources.resx`） |
 
+## 動作環境
+
+- PowerToys v0.100.2 以降（同梱テンプレートと同じ Extension SDK `0.11.260520004` / .NET 10 を使用）
+- ビルド: Visual Studio 2026（.NET 10 のため VS 2022 は不可）
+
 ## ビルド / インストール
 
-1. Visual Studio 2022（.NET デスクトップ開発 + Windows アプリ SDK / MSIX ツール）で `CmdPltVscodeLauncer.sln` を開く
+1. Visual Studio 2026 で `CmdPltVscodeLauncer.sln` を開く（不足ワークロードは `.vsconfig` から追加される）
 2. プラットフォーム `x64`（または `ARM64`）で **配置 (Deploy)** を実行
 3. Command Palette で「Reload」を実行（または CmdPal を再起動）
 
