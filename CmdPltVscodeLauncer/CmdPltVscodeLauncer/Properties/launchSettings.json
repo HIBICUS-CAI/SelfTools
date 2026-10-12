@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "CmdPltVscodeLauncer (Package)": {
+      "commandName": "MsixPackage",
+      "doNotLaunchApp": true
+    },
+    "CmdPltVscodeLauncer (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
