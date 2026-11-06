@@ -1,0 +1,25 @@
+cmake_minimum_required(VERSION 3.20)
+project(FastReplacer CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+add_executable(FastReplacer src/main.cpp src/Matcher.cpp src/Platform.cpp)
+
+if(MSVC)
+    target_compile_options(FastReplacer PRIVATE /utf-8 /W3 /permissive- $<$<CONFIG:Release>:/O2 /Oi /GL>)
+    target_link_options(FastReplacer PRIVATE $<$<CONFIG:Release>:/LTCG>)
+    target_compile_definitions(FastReplacer PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
+    set_property(TARGET FastReplacer PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+else()
+    target_compile_options(FastReplacer PRIVATE -Wall -Wextra $<$<CONFIG:Release>:-O2>)
+    if(WIN32)  # MinGW
+        target_link_options(FastReplacer PRIVATE -municode -static)
+    else()
+        find_package(Threads REQUIRED)
+        target_link_libraries(FastReplacer PRIVATE Threads::Threads)
+    endif()
+endif()
