@@ -1,0 +1,104 @@
+name: FastReplacer
+
+on:
+  push:
+    branches: ['**']
+    tags: ['FastReplacer-v*']
+    paths:
+      - 'FastReplacer/**'
+      - '.github/workflows/fastreplacer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Environment info
+        shell: pwsh
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}
+          (Get-CimInstance Win32_Processor).Name
+          [Environment]::ProcessorCount
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property displayName
+
+      - name: Build (MSVC, Release x64)
+        run: msbuild FastReplacer\FastReplacer.vcxproj /m /v:minimal /p:Configuration=Release /p:Platform=x64 /p:OutDir=${{ github.workspace }}\out\
+
+      - name: Smoke test
+        run: |
+          out\FastReplacer.exe --help
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Random comparison test (AVX2 path)
+        run: python FastReplacer\tests\test_fastreplacer.py out\FastReplacer.exe --cases 400 --seed 1
+        env:
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+
+      - name: Random comparison test (SSE2 path)
+        run: python FastReplacer\tests\test_fastreplacer.py out\FastReplacer.exe --cases 200 --seed 2
+        env:
+          FASTREPLACER_NO_AVX2: '1'
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+
+      - name: Large file test (> 4 GiB)
+        run: python FastReplacer\tests\bigfile_test.py out\FastReplacer.exe "${{ runner.temp }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FastReplacer-win-x64
+          path: |
+            out/FastReplacer.exe
+            FastReplacer/README.md
+
+  release:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/FastReplacer-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: FastReplacer-win-x64
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          find . -type f
+          cp out/FastReplacer.exe FastReplacer.exe
+          zip -j FastReplacer-win-x64.zip out/FastReplacer.exe FastReplacer/README.md
+          cat > notes.md <<'EOF'
+          フォルダ内の全ファイルを UTF-8 テキストとして高速に検索・置換するコマンドラインツール (Windows x64, MSVC ビルド)。
+
+          ```
+          FastReplacer <フォルダ> -f <検索> -r <置換> [-c] [-w] [-R] [-e] [-t N] [-o report.txt]
+          FastReplacer <フォルダ> -f <検索> -s [-c] [-w] [-R] [-o report.txt]
+          ```
+
+          - `-c` 大小区別 / `-w` 単語単位 (いずれも既定は無効)
+          - `-s` 検索のみ (行・列・オフセット・文脈をレポート出力)
+          - 詳細は同梱の README.md を参照
+
+          このリリースの exe は GitHub Actions (windows-latest / MSVC) でビルドし、ランダム照合テストと 4 GiB 超ファイルの検証を通過したものです。
+          EOF
+          gh release create "$GITHUB_REF_NAME" FastReplacer.exe FastReplacer-win-x64.zip \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "FastReplacer ${GITHUB_REF_NAME#FastReplacer-}" --notes-file notes.md
