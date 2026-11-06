@@ -8,6 +8,11 @@ on:
       - 'FastReplacer/**'
       - '.github/workflows/fastreplacer.yml'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'リリースを作成する場合のタグ名 (例: FastReplacer-v1.0.0)。空ならビルドとテストのみ'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -67,7 +72,7 @@ jobs:
 
   release:
     needs: build-test
-    if: startsWith(github.ref, 'refs/tags/FastReplacer-v')
+    if: startsWith(github.ref, 'refs/tags/FastReplacer-v') || (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.release_tag, 'FastReplacer-v'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,6 +85,7 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
         run: |
           cd dist
           find . -type f
@@ -99,6 +105,6 @@ jobs:
 
           このリリースの exe は GitHub Actions (windows-latest / MSVC) でビルドし、ランダム照合テストと 4 GiB 超ファイルの検証を通過したものです。
           EOF
-          gh release create "$GITHUB_REF_NAME" FastReplacer.exe FastReplacer-win-x64.zip \
+          gh release create "$TAG" FastReplacer.exe FastReplacer-win-x64.zip \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "FastReplacer ${GITHUB_REF_NAME#FastReplacer-}" --notes-file notes.md
+            --title "FastReplacer ${TAG#FastReplacer-}" --notes-file notes.md
