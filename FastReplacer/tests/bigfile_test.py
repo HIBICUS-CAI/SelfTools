@@ -118,8 +118,8 @@ def main():
 
     exp_lc = expected_line_col(block, offs, size)
     rx = re.compile(r"^  L(\d+):C(\d+)  @(\d+)")
-    # 大小区別あり / なし / 文脈あり
-    for extra in (["-c"], [], ["-x"]):
+    # 大小区別あり / なし
+    for extra in (["-c"], []):
         report = os.path.join(a.workdir, "big_report.txt")
         run([a.exe, d, "-f", "NEEDLE" if "-c" in extra else "needle", "-s", "-o", report] + extra)
         got = []

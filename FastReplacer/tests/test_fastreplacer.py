@@ -199,7 +199,7 @@ def main():
             mc = rng.random() < 0.4
             ww = rng.random() < 0.4
             rec = rng.random() < 0.5
-            cx = rng.random() < 0.5
+            cx = False  # 文脈出力 (-x) は廃止
             chunk = rng.choice([1, 2, 3, 7, 16, 33, 64, 1000, 1 << 20])
             threads = rng.choice([1, 2, 3, 8])
             io = rng.choice([[], [], ["--sequential"]])
@@ -237,9 +237,9 @@ def main():
 
             # --- 検索 ---
             report = os.path.join(root, "rep%d.txt" % case)
-            # -x なし & -o なし → 標準出力、それ以外 → レポートファイル
-            use_stdout = (not cx) and rng.random() < 0.5
-            sargs = build("s" + ("x" if cx else "")) + ([] if use_stdout else ["-o", to_tool_path(report, a.wine)])
+            # -o なし → 標準出力 (非対話なので全件)、-o あり → ファイル
+            use_stdout = rng.random() < 0.5
+            sargs = build("s") + ([] if use_stdout else ["-o", to_tool_path(report, a.wine)])
             r = run_tool(prefix, [to_tool_path(d, a.wine)] + sargs)
             ctx = "case=%d pats=%r mc=%s ww=%s cx=%s chunk=%d threads=%d io=%s args=%r" % (case, pats, mc, ww, cx, chunk, threads, io, sargs)
             if r.returncode != 0:

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "Matcher.h"
+#include "Pager.h"
 #include "Platform.h"
 
 #ifdef _WIN32
@@ -48,8 +49,8 @@ struct Config
     bool searchOnly = false;
     bool recursive = false;
     bool escapes = false;
-    bool context = false;
     bool sequential = false;  // ファイル間の重ね合わせを行わない
+    bool viewTempFile = false;  // ページャ表示用の結果を一時ファイルに置く (既定はメモリ)
     MatchOptions opt;
     std::string reportPath;
     unsigned threads = 0;
@@ -68,17 +69,16 @@ void PrintUsage()
         "オプション:\n"
         "  -f, --find <text>      検索文字列 (必須、複数指定可。全て同じ置換文字列に置き換える)\n"
         "  -r, --replace <text>   置換文字列 (空文字列可 = 削除)\n"
-        "  -s, --search-only      検索のみ。結果を標準出力へ出す (-x または -o 指定時はレポートファイル)\n"
+        "  -s, --search-only      検索のみ。結果を画面に一部ずつ表示する (↑↓ PgUp/PgDn Home/End ←→ で移動、q で閉じる)\n"
+        "                         リダイレクト/パイプ時は全件を標準出力へ流す\n"
         "  -c, --match-case       大文字/小文字を区別する (既定: 区別しない)\n"
         "  -w, --whole-word       単語単位で検索する (既定: 無効)\n"
         "  -R, --recursive        サブフォルダも対象にする (既定: 指定フォルダ直下のみ)\n"
         "  -e, --escape           検索/置換文字列のエスケープを解釈する\n"
         "                         (\\\\ \\n \\r \\t \\0 \\xHH \\uXXXX \\UXXXXXXXX)\n"
-        "  -x, --context          前後の文脈も出力し、結果をレポートファイルに書き出す\n"
-        "  -o, --report <path>    レポートファイルのパス\n"
-        "                         (-x 時の既定: カレントに FastReplacer_report_<日時>.txt。\n"
-        "                          -x なしの検索・置換モードでは指定時のみ出力)\n"
+        "  -o, --report <path>    結果をファイルに書き出す (指定時のみ。検索モードでは画面表示の代わり)\n"
         "  -t, --threads <n>      スレッド数 (既定: 論理コア数)\n"
+        "      --tempfile         画面表示用の結果をメモリではなく一時ファイルに置く (結果が膨大な場合向け)\n"
         "      --sequential       ファイルを 1 つずつ処理する (既定は書き出しと次ファイルの検索を重ねる。\n"
         "                         HDD など読み書きの同時実行が遅いディスク向け)\n"
         "  -h, --help             このヘルプ\n"
@@ -162,10 +162,10 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         kWord,
         kRec,
         kEsc,
-        kCtx,
         kReport,
         kThreads,
         kSeq,
+        kTemp,
         kChunk,
         kHelp,
         kNone
@@ -180,8 +180,8 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
     static const Def defs[] = {
         {'f', "find", kFind, true},          {'r', "replace", kReplace, true},  {'s', "search-only", kSearch, false},
         {'c', "match-case", kCase, false},   {'w', "whole-word", kWord, false}, {'R', "recursive", kRec, false},
-        {'e', "escape", kEsc, false},        {'x', "context", kCtx, false},     {'o', "report", kReport, true},
-        {'t', "threads", kThreads, true},    {0, "sequential", kSeq, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
+        {'e', "escape", kEsc, false},        {'o', "report", kReport, true},
+        {'t', "threads", kThreads, true},    {0, "sequential", kSeq, false}, {0, "tempfile", kTemp, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
         {'h', "help", kHelp, false},
     };
 
@@ -208,10 +208,10 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         case kWord: cfg.opt.wholeWord = true; break;
         case kRec: cfg.recursive = true; break;
         case kEsc: cfg.escapes = true; break;
-        case kCtx: cfg.context = true; break;
         case kReport: cfg.reportPath = v; break;
         case kThreads: cfg.threads = (unsigned)std::strtoul(v.c_str(), nullptr, 10); break;
         case kSeq: cfg.sequential = true; break;
+        case kTemp: cfg.viewTempFile = true; break;
         case kChunk: cfg.chunk = std::max<uint64_t>(1, std::strtoull(v.c_str(), nullptr, 10)); break;
         case kHelp: PrintUsage(); return 1;
         default: break;
@@ -540,55 +540,6 @@ inline void AppendU64(std::string& out, uint64_t v)
     out.append(q, (size_t)(e - q));
 }
 
-// 文字境界へ前方に寄せる
-inline uint64_t SnapForward(const uint8_t* t, uint64_t n, uint64_t p, uint64_t limit)
-{
-    while (p < limit && p < n && (t[p] & 0xC0) == 0x80) ++p;
-    return p;
-}
-// 文字境界へ後方に寄せる (p は終端位置)
-inline uint64_t SnapBackward(const uint8_t* t, uint64_t n, uint64_t p, uint64_t limit)
-{
-    while (p > limit && p < n && (t[p] & 0xC0) == 0x80) --p;
-    return p;
-}
-
-constexpr uint64_t kCtx = 100;       // 前後の表示バイト数
-constexpr uint64_t kMatchShow = 200;  // 一致部分の最大表示バイト数
-
-void AppendContext(std::string& out, const uint8_t* t, uint64_t n, const Match& m)
-{
-    // 行頭 (最大 kCtx バイト前まで)
-    const uint64_t lb = m.pos > kCtx ? m.pos - kCtx : 0;
-    const uint8_t* nl = simd::FindLastByte(t + lb, m.pos - lb, '\n');
-    uint64_t s = nl ? (uint64_t)(nl - t) + 1 : lb;
-    const bool cutL = !nl && lb > 0;
-    if (cutL) s = SnapForward(t, n, s, m.pos);
-    // 行末 (最大 kCtx バイト後まで)
-    const uint64_t me = m.pos + m.len;
-    const uint64_t rl = std::min(n, me + kCtx);
-    const void* nr = std::memchr(t + me, '\n', (size_t)(rl - me));
-    uint64_t e = nr ? (uint64_t)((const uint8_t*)nr - t) : rl;
-    if (e > me && t[e - 1] == '\r' && nr) --e;
-    const bool cutR = !nr && rl < n;
-    if (cutR) e = SnapBackward(t, n, e, me);
-
-    if (cutL) out += "…";
-    AppendVisible(out, t + s, m.pos - s);
-    out += "【";
-    if (m.len > kMatchShow)
-    {
-        const uint64_t ce = SnapBackward(t, n, m.pos + kMatchShow, m.pos);
-        AppendVisible(out, t + m.pos, ce - m.pos);
-        out += "…";
-    }
-    else
-        AppendVisible(out, t + m.pos, m.len);
-    out += "】";
-    AppendVisible(out, t + me, e - me);
-    if (cutR) out += "…";
-}
-
 // ============================================================================
 // ファイル処理 (検索 → 出力 の 2 段パイプライン。段ごとにファイル順を保つ)
 // ============================================================================
@@ -836,7 +787,7 @@ void Processor::WriteSearchReport(const Job& job, plat::TextWriter& rep)
         {
             const Sum& s = sums[c];
             if (s.mBegin == s.mEnd) return;
-            out.reserve((s.mEnd - s.mBegin) * (cfg_.context ? 160 : 32));
+            out.reserve((s.mEnd - s.mBegin) * 32);
             uint64_t pos = c * cs, ln = baseLine[c], cl = carryCol[c];
             for (size_t k = s.mBegin; k < s.mEnd; ++k)
             {
@@ -862,11 +813,6 @@ void Processor::WriteSearchReport(const Job& job, plat::TextWriter& rep)
                 {
                     out += "  #";
                     AppendU64(out, (uint64_t)m.pat + 1);
-                }
-                if (cfg_.context)
-                {
-                    out += "  ";
-                    AppendContext(out, t, n, m);
                 }
                 out.push_back('\n');
             }
@@ -1061,16 +1007,22 @@ int Run(const std::vector<std::string>& args)
         return 2;
     }
 
-    // レポート: 検索モードで文脈なし (-x なし) かつ -o 未指定なら、レポート相当の内容を標準出力へ流す
+    // 結果の出力先
+    //  -o 指定           : ファイル
+    //  検索 + 対話端末   : メモリ (--tempfile 時は一時ファイル) に溜めてページャで表示
+    //  検索 + リダイレクト: 標準出力へ全件
     plat::TextWriter report;
-    const bool toStdout = cfg.searchOnly && !cfg.context && cfg.reportPath.empty();
-    const bool useFile = (cfg.searchOnly && !toStdout) || !cfg.reportPath.empty();
-    const bool useReport = useFile || toStdout;
+    const bool useFile = !cfg.reportPath.empty();
+    const bool toPager = cfg.searchOnly && !useFile && pager::IsInteractive();
+    const bool toStdout = cfg.searchOnly && !useFile && !toPager;
+    const bool useReport = useFile || toPager || toStdout;
+    const bool pagerFile = toPager && cfg.viewTempFile;
     NativePath reportPath;
-    if (useFile)
+    if (toPager && !pagerFile)
+        report.OpenMemory();
+    else if (useFile || pagerFile)
     {
-        if (cfg.reportPath.empty()) cfg.reportPath = "FastReplacer_report_" + NowString(true) + ".txt";
-        reportPath = plat::FromUtf8(cfg.reportPath);
+        reportPath = useFile ? plat::FromUtf8(cfg.reportPath) : plat::TempFilePath("FastReplacer_view_");
         if (!report.Open(reportPath, err))
         {
             std::fprintf(stderr, "エラー: %s\n", err.c_str());
@@ -1084,29 +1036,30 @@ int Run(const std::vector<std::string>& args)
     }
     // レポート自身と一時ファイルは対象外
     files.erase(std::remove_if(files.begin(), files.end(),
-                               [&](const NativePath& f) { return (useFile && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
+                               [&](const NativePath& f)
+                               { return ((useFile || pagerFile) && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
                 files.end());
 
     const char* mode = cfg.searchOnly ? "検索のみ" : "置換";
     std::printf("FastReplacer  モード: %s  大小区別: %s  単語単位: %s  検索文字列: %zu 個  スレッド: %u  AVX2: %s\n", mode,
                 cfg.opt.matchCase ? "ON" : "OFF", cfg.opt.wholeWord ? "ON" : "OFF", cfg.finds.size(), cfg.threads, simd::HasAvx2() ? "ON" : "OFF");
     std::printf("フォルダ: %s  (%zu ファイル)\n", plat::ToUtf8(dir).c_str(), files.size());
-    if (toStdout)
+
+    // 検索文字列の一覧と書式 (標準出力・ページャ用の見出し)
+    std::string fmt;
+    for (size_t k = 0; k < cfg.finds.size(); ++k)
     {
-        std::string h;
-        for (size_t k = 0; k < cfg.finds.size(); ++k)
-        {
-            h += "検索 #";
-            AppendU64(h, k + 1);
-            h += ": ";
-            AppendVisible(h, (const uint8_t*)cfg.finds[k].data(), cfg.finds[k].size());
-            h += "\n";
-        }
-        h += "書式: L<行>:C<列(文字)>  @<バイトオフセット>";
-        if (cfg.finds.size() > 1) h += "  #<検索文字列番号>";
-        h += "\n\n";
-        std::fputs(h.c_str(), stdout);
+        fmt += "検索 #";
+        AppendU64(fmt, k + 1);
+        fmt += ": ";
+        AppendVisible(fmt, (const uint8_t*)cfg.finds[k].data(), cfg.finds[k].size());
+        fmt += "\n";
     }
+    fmt += "書式: L<行>:C<列(文字)>  @<バイトオフセット>";
+    if (cfg.finds.size() > 1) fmt += "  #<検索文字列番号>";
+    fmt += "\n\n";
+    if (toStdout) std::fputs(fmt.c_str(), stdout);
+    if (toPager) report.Write(fmt);
     std::fflush(stdout);
 
     if (useFile)
@@ -1136,7 +1089,6 @@ int Run(const std::vector<std::string>& args)
         {
             h += "書式      : L<行>:C<列(文字)>  @<バイトオフセット>";
             if (cfg.finds.size() > 1) h += "  #<検索文字列番号>";
-            if (cfg.context) h += "  <前後の文脈>【一致】";
             h += "\n\n";
         }
         else
@@ -1172,19 +1124,53 @@ int Run(const std::vector<std::string>& args)
     std::snprintf(sum, sizeof(sum), "合計: %zu ファイル / 一致 %llu ファイル / %llu 件 / エラー %llu  (%s, %.2f s, %.2f GB/s)\n", files.size(),
                   (unsigned long long)hitFiles, (unsigned long long)totalMatches, (unsigned long long)errFiles, FormatBytes(totalBytes).c_str(), sec,
                   sec > 0 ? totalBytes / sec / 1e9 : 0.0);
-    std::fputs(sum, stdout);
+    std::string tail;
+    for (const auto& e : errors) tail += "エラー: " + e + "\n";
     if (toStdout)
-        report.Close();
-    else if (useFile)
     {
-        std::string tail = "\n---\n";
-        tail += sum;
-        for (const auto& e : errors) tail += "エラー: " + e + "\n";
-        report.Write(tail);
-        if (!report.Close())
-            std::fprintf(stderr, "エラー: レポートの書き込みに失敗しました\n");
+        report.Close();
+        std::fputs(sum, stdout);
+    }
+    else if (toPager)
+    {
+        report.Write(std::string("---\n") + sum + tail);
+        std::string title = "FastReplacer 検索結果 ";
+        AppendU64(title, totalMatches);
+        title += " 件";
+        if (!pagerFile)
+        {
+            if (totalMatches > 0) pager::Run((const uint8_t*)report.Memory().data(), report.Memory().size(), title);
+            report.Close();
+        }
         else
-            std::printf("レポート: %s\n", plat::ToUtf8(reportPath).c_str());
+        {
+            const bool ok = report.Close();
+            if (ok && totalMatches > 0)
+            {
+                plat::InputFile view;
+                std::string e2;
+                if (view.Open(reportPath, e2))
+                    pager::Run(view.Data(), view.Size(), title);
+                else
+                    std::fprintf(stderr, "エラー: 結果を表示できません: %s\n", e2.c_str());
+            }
+            else if (!ok)
+                std::fprintf(stderr, "エラー: 結果の一時ファイルに書き込めませんでした\n");
+            plat::DeleteFileQuiet(reportPath);
+        }
+        std::fputs(sum, stdout);
+    }
+    else
+    {
+        std::fputs(sum, stdout);
+        if (useFile)
+        {
+            report.Write("\n---\n" + std::string(sum) + tail);
+            if (!report.Close())
+                std::fprintf(stderr, "エラー: レポートの書き込みに失敗しました\n");
+            else
+                std::printf("レポート: %s\n", plat::ToUtf8(reportPath).c_str());
+        }
     }
     return errFiles ? 1 : 0;
 }

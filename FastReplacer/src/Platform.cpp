@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cwchar>
+#include <ctime>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -325,6 +326,15 @@ bool ReplaceWith(const NativePath& target, const NativePath& tmp, std::string& e
 
 void DeleteFileQuiet(const NativePath& p) { DeleteFileW(p.c_str()); }
 
+NativePath TempFilePath(const char* prefix)
+{
+    wchar_t dir[MAX_PATH + 1];
+    DWORD n = GetTempPathW(MAX_PATH + 1, dir);
+    std::wstring d = n ? std::wstring(dir, n) : std::wstring(L".\\");
+    std::string name = std::string(prefix) + std::to_string(GetCurrentProcessId()) + "_" + std::to_string(GetTickCount64()) + ".txt";
+    return FromUtf8(ToUtf8(d) + name);
+}
+
 bool TextWriter::Open(const NativePath& path, std::string& err)
 {
     fp_ = _wfopen(path.c_str(), L"wb");
@@ -515,6 +525,14 @@ bool ReplaceWith(const NativePath& target, const NativePath& tmp, std::string& e
 
 void DeleteFileQuiet(const NativePath& p) { unlink(p.c_str()); }
 
+NativePath TempFilePath(const char* prefix)
+{
+    const char* t = std::getenv("TMPDIR");
+    std::string d = (t && *t) ? t : "/tmp";
+    if (d.back() != '/') d += "/";
+    return d + prefix + std::to_string(getpid()) + "_" + std::to_string((unsigned long long)time(nullptr)) + ".txt";
+}
+
 bool TextWriter::Open(const NativePath& path, std::string& err)
 {
     fp_ = std::fopen(path.c_str(), "wb");
@@ -535,9 +553,19 @@ void TextWriter::OpenStdout()
     owned_ = false;
 }
 
+void TextWriter::OpenMemory()
+{
+    fp_ = nullptr;
+    memory_ = true;
+    mem_.clear();
+}
+
 void TextWriter::Write(const std::string& s)
 {
-    if (fp_ && !s.empty() && std::fwrite(s.data(), 1, s.size(), fp_) != s.size()) ok_ = false;
+    if (memory_)
+        mem_ += s;
+    else if (fp_ && !s.empty() && std::fwrite(s.data(), 1, s.size(), fp_) != s.size())
+        ok_ = false;
 }
 
 void TextWriter::Flush()

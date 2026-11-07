@@ -75,8 +75,20 @@ jobs:
             out/FastReplacer.exe
             FastReplacer/README.md
 
+  pager-test:
+    # ページャは対話端末が必要なため、疑似端末 (pty) が使える Linux で操作を検証する
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (g++)
+        run: g++ -std=c++20 -O2 -Wall -Wextra -o fr FastReplacer/src/*.cpp -lpthread
+      - name: Pager test (memory)
+        run: python3 FastReplacer/tests/pager_test.py ./fr
+      - name: Pager test (--tempfile)
+        run: python3 FastReplacer/tests/pager_test.py ./fr --tempfile
+
   release:
-    needs: build-test
+    needs: [build-test, pager-test]
     if: startsWith(github.ref, 'refs/tags/FastReplacer-v') || (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.release_tag, 'FastReplacer-v'))
     runs-on: ubuntu-latest
     permissions:
@@ -102,12 +114,13 @@ jobs:
 
           ```
           FastReplacer <フォルダ> -f <検索> [-f <検索2> ...] -r <置換> [-c] [-w] [-R] [-e] [-t N] [-o report.txt]
-          FastReplacer <フォルダ> -f <検索> [-f <検索2> ...] -s [-c] [-w] [-R] [-x] [-o report.txt]
+          FastReplacer <フォルダ> -f <検索> [-f <検索2> ...] -s [-c] [-w] [-R] [-o report.txt]
           ```
 
           - `-f` は複数指定可 (全て `-r` の文字列に置換。同位置の競合は最長一致)
           - `-c` 大小区別 / `-w` 単語単位 (いずれも既定は無効)
-          - `-s` 検索のみ (行・列・オフセットを標準出力へ。`-x` で前後の文脈付きのレポートファイルを出力)
+          - `-s` 検索のみ。結果 (行・列・オフセット) を画面に一部ずつ表示 (↑↓ PgUp/PgDn Home/End ←→ で移動、q で閉じる)。リダイレクト時は全件を標準出力へ
+          - `-o` 指定時のみ結果をファイルに出力。`--tempfile` で画面表示用の結果を一時ファイルに置く (既定はメモリ)
           - 短いオプションはまとめ指定可 (例: `-cwR`, `-rc <置換>`)
           - `--sequential` でファイルを 1 つずつ処理 (既定は書き出しと次ファイルの検索を重ねる。HDD 向け)
           - 詳細は同梱の README.md を参照

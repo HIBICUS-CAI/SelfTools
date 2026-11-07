@@ -7,7 +7,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-add_executable(FastReplacer src/main.cpp src/Matcher.cpp src/Platform.cpp)
+add_executable(FastReplacer src/main.cpp src/Matcher.cpp src/Pager.cpp src/Platform.cpp)
 
 if(MSVC)
     target_compile_options(FastReplacer PRIVATE /utf-8 /W3 /permissive- $<$<CONFIG:Release>:/O2 /Oi /GL>)

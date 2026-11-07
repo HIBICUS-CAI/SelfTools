@@ -86,6 +86,7 @@ private:
 // tmp で target を置き換える (属性等は target のものを維持)
 bool ReplaceWith(const NativePath& target, const NativePath& tmp, std::string& err);
 void DeleteFileQuiet(const NativePath& p);
+NativePath TempFilePath(const char* prefix);  // 一時ファイル用の一意なパス
 
 // レポート等の通常書き込み用
 class TextWriter
@@ -94,6 +95,8 @@ public:
     ~TextWriter() { Close(); }
     bool Open(const NativePath& path, std::string& err);
     void OpenStdout();  // 標準出力へ書く (Close で閉じずにフラッシュのみ)
+    void OpenMemory();  // メモリ上に溜める (Memory() で取得)
+    std::string& Memory() { return mem_; }
     void Write(const std::string& s);
     void Flush();
     bool Close();
@@ -102,6 +105,8 @@ public:
 private:
     std::FILE* fp_ = nullptr;
     bool owned_ = false;
+    bool memory_ = false;
+    std::string mem_;
     bool ok_ = true;
 };
 }  // namespace plat
