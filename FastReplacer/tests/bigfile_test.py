@@ -116,10 +116,11 @@ def main():
     print("generated %d bytes in %.1f s, plants=%s" % (size, time.time() - t0, offs), flush=True)
 
     exp_lc = expected_line_col(block, offs, size)
-    rx = re.compile(r"^  L(\d+):C(\d+)  @(\d+)  ")
-    for extra in (["-c"], []):  # 大小区別あり / なし
+    rx = re.compile(r"^  L(\d+):C(\d+)  @(\d+)")
+    # 大小区別あり / なし × RAM 直接読み込み / メモリマップ × 文脈なし / あり
+    for extra in (["-c"], [], ["-c", "--mmap"], ["-x"]):
         report = os.path.join(a.workdir, "big_report.txt")
-        run([a.exe, d, "-f", "NEEDLE" if extra else "needle", "-s", "-o", report] + extra)
+        run([a.exe, d, "-f", "NEEDLE" if "-c" in extra else "needle", "-s", "-o", report] + extra)
         got = []
         with open(report, encoding="utf-8-sig") as f:
             for ln in f:
@@ -129,7 +130,7 @@ def main():
         exp = [(o,) + exp_lc[o] for o in offs]
         if got != exp:
             sys.exit("FAIL search %s\n exp=%s\n got=%s" % (extra, exp, got))
-        print("search %s OK: %s" % (extra or "[ignore-case]", got), flush=True)
+        print("search %s OK: %s" % (extra, got), flush=True)
         os.remove(report)
 
     run([a.exe, d, "-f", "NEEDLE", "-r", REP.decode("utf-8"), "-c"])

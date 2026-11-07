@@ -8,6 +8,7 @@ struct Match
 {
     uint64_t pos;
     uint32_t len;
+    uint32_t pat;  // 一致した検索文字列の番号 (0 始まり)
 };
 
 struct MatchOptions
@@ -63,6 +64,24 @@ private:
     bool wholeWord_ = false;
     bool wordStart_ = false;
     bool wordEnd_ = false;
+    uint32_t minLen_ = 0, maxLen_ = 0;
+};
+
+// 複数の検索文字列をまとめて検索する。
+// 最も左の一致を採用し、同じ位置で複数一致した場合は最長 (同長なら先に指定したもの) を採用する。
+class MultiMatcher
+{
+public:
+    bool Compile(const std::vector<std::u32string>& patterns, const MatchOptions& opt, std::string& err);
+    void FindAll(const uint8_t* text, uint64_t n, uint64_t begin, uint64_t end, std::vector<Match>& out) const;
+    bool FindNext(const uint8_t* text, uint64_t n, uint64_t from, uint64_t end, Match& m) const;
+    uint32_t MinLen() const { return minLen_; }
+    uint32_t MaxLen() const { return maxLen_; }
+    size_t Count() const { return m_.size(); }
+
+private:
+    bool Scan(const uint8_t* t, uint64_t n, uint64_t begin, uint64_t end, std::vector<Match>* out, Match* first) const;
+    std::vector<Matcher> m_;
     uint32_t minLen_ = 0, maxLen_ = 0;
 };
 

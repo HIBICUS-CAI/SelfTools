@@ -437,9 +437,10 @@ inline bool Emit(const Ctx& c, uint64_t p, uint32_t len)
     {
         c.first->pos = p;
         c.first->len = len;
+        c.first->pat = 0;
         return true;
     }
-    c.out->push_back({p, len});
+    c.out->push_back({p, len, 0});
     return false;
 }
 
@@ -586,6 +587,109 @@ void Matcher::FindAll(const uint8_t* text, uint64_t n, uint64_t begin, uint64_t 
 }
 
 bool Matcher::FindNext(const uint8_t* text, uint64_t n, uint64_t from, uint64_t end, Match& m) const
+{
+    return Scan(text, n, from, end, nullptr, &m);
+}
+
+// ============================================================================
+// 複数パターン
+// ============================================================================
+bool MultiMatcher::Compile(const std::vector<std::u32string>& patterns, const MatchOptions& opt, std::string& err)
+{
+    m_.clear();
+    if (patterns.empty())
+    {
+        err = "検索文字列がありません";
+        return false;
+    }
+    minLen_ = UINT32_MAX;
+    maxLen_ = 0;
+    for (size_t i = 0; i < patterns.size(); ++i)
+    {
+        Matcher m;
+        if (!m.Compile(patterns[i], opt, err))
+        {
+            err = "検索文字列 #" + std::to_string(i + 1) + ": " + err;
+            return false;
+        }
+        minLen_ = std::min(minLen_, m.MinLen());
+        maxLen_ = std::max(maxLen_, m.MaxLen());
+        m_.push_back(std::move(m));
+    }
+    return true;
+}
+
+bool MultiMatcher::Scan(const uint8_t* t, uint64_t n, uint64_t begin, uint64_t end, std::vector<Match>* out, Match* first) const
+{
+    if (m_.size() == 1)
+    {
+        if (first) return m_[0].FindNext(t, n, begin, end, *first);
+        m_[0].FindAll(t, n, begin, end, *out);
+        return false;
+    }
+    // パターンごとに「次の一致」または「lim より前に一致なし」を保持し、
+    // 最も遅れているパターンから窓単位で探索を進める (各パターンが同じ領域をほぼ同時に読むのでキャッシュ効率が良い)
+    constexpr uint64_t kWindow = 1ull << 20;
+    struct St
+    {
+        bool has;
+        Match m;
+        uint64_t lim;
+    };
+    const size_t k = m_.size();
+    std::vector<St> st(k, St{false, {0, 0, 0}, begin});
+    uint64_t pos = begin;
+    for (;;)
+    {
+        int best = -1, front = -1;
+        for (size_t p = 0; p < k; ++p)
+        {
+            St& s = st[p];
+            if (s.has ? s.m.pos < pos : s.lim < pos)
+            {
+                s.has = false;
+                s.lim = pos;
+            }
+            if (s.has)
+            {
+                if (best < 0 || s.m.pos < st[best].m.pos || (s.m.pos == st[best].m.pos && s.m.len > st[best].m.len)) best = (int)p;
+            }
+            else if (s.lim < end && (front < 0 || s.lim < st[front].lim))
+                front = (int)p;
+        }
+        if (front >= 0 && (best < 0 || st[front].lim <= st[best].m.pos))
+        {
+            St& s = st[front];
+            const uint64_t to = std::min(end, s.lim + kWindow);
+            Match mm;
+            if (m_[front].FindNext(t, n, s.lim, to, mm))
+            {
+                s.has = true;
+                s.m = mm;
+                s.m.pat = (uint32_t)front;
+            }
+            else
+                s.lim = to;
+            continue;
+        }
+        if (best < 0) return false;
+        const Match m = st[best].m;
+        if (first)
+        {
+            *first = m;
+            return true;
+        }
+        out->push_back(m);
+        pos = m.pos + m.len;
+    }
+}
+
+void MultiMatcher::FindAll(const uint8_t* text, uint64_t n, uint64_t begin, uint64_t end, std::vector<Match>& out) const
+{
+    Scan(text, n, begin, end, &out, nullptr);
+}
+
+bool MultiMatcher::FindNext(const uint8_t* text, uint64_t n, uint64_t from, uint64_t end, Match& m) const
 {
     return Scan(text, n, from, end, nullptr, &m);
 }

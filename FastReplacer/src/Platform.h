@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -21,31 +22,53 @@ bool ListFiles(const NativePath& dir, bool recursive, std::vector<NativePath>& o
 bool IsDirectory(const NativePath& p);
 bool SameFile(const NativePath& a, const NativePath& b);
 
-// 読み取り専用メモリマップ
-class MappedFile
+// 入力ファイル
+//  Ram    : 全体を RAM バッファへ読み込む (Windows はキャッシュを経由しない非バッファ + 非同期 I/O を多重発行)
+//  Mapped : 読み取り専用メモリマップ (メモリ不足時・--mmap 指定時)
+// どちらのモードでも Close() まで他プロセスからの書き込みを禁止する
+class InputFile
 {
 public:
-    MappedFile() = default;
-    MappedFile(const MappedFile&) = delete;
-    MappedFile& operator=(const MappedFile&) = delete;
-    ~MappedFile() { Close(); }
+    enum class Mode
+    {
+        None,
+        Ram,
+        Mapped
+    };
 
-    bool Open(const NativePath& path, std::string& err);
+    InputFile() = default;
+    InputFile(const InputFile&) = delete;
+    InputFile& operator=(const InputFile&) = delete;
+    ~InputFile() { Close(); }
+
+    bool Open(const NativePath& path, std::string& err);  // オープンしてサイズ取得のみ
+    bool PrepareRam(std::string& err);                     // バッファ確保 (失敗時は PrepareMapped へ)
+    bool PrepareMapped(std::string& err);
+    // Ram モード: unit (4096 の倍数) 単位で先頭から読み込み、完了ごとに onDone(index) を呼ぶ
+    bool Load(uint64_t unit, unsigned queueDepth, const std::function<void(size_t)>& onDone, std::string& err);
+    void Prefetch(uint64_t off, uint64_t len) const;  // Mapped モードの先読みヒント
     void Close();
-    void Prefetch(uint64_t off, uint64_t len) const;  // 先読みヒント
+
     const uint8_t* Data() const { return data_; }
     uint64_t Size() const { return size_; }
+    Mode GetMode() const { return mode_; }
 
 private:
+    NativePath path_;
     const uint8_t* data_ = nullptr;
     uint64_t size_ = 0;
+    Mode mode_ = Mode::None;
 #ifdef _WIN32
     void* file_ = nullptr;
     void* map_ = nullptr;
+    bool unbuffered_ = false;
 #else
     int fd_ = -1;
 #endif
 };
+
+// 現在利用可能な物理メモリ (バイト)
+uint64_t AvailableMemory();
 
 // 4096 バイト境界に整列したメモリ
 void* AllocAligned(uint64_t size);

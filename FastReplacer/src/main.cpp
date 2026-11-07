@@ -42,15 +42,20 @@ namespace
 struct Config
 {
     std::string folder;
-    std::string find, replace;
+    std::vector<std::string> finds;
+    std::string replace;
     bool hasReplace = false;
     bool searchOnly = false;
     bool recursive = false;
     bool escapes = false;
+    bool context = false;
+    bool forceMmap = false;
     MatchOptions opt;
     std::string reportPath;
     unsigned threads = 0;
     uint64_t chunk = 32ull << 20;
+    bool hasMemLimit = false;
+    uint64_t memLimit = 0;
 };
 
 void PrintUsage()
@@ -59,11 +64,11 @@ void PrintUsage()
         "FastReplacer - フォルダ内の全ファイルを UTF-8 テキストとして高速に検索/置換\n"
         "\n"
         "使い方:\n"
-        "  FastReplacer <フォルダ> -f <検索文字列> -r <置換文字列> [オプション]   置換モード\n"
-        "  FastReplacer <フォルダ> -f <検索文字列> -s [オプション]                検索のみ (レポート出力)\n"
+        "  FastReplacer <フォルダ> -f <検索> [-f <検索2> ...] -r <置換> [オプション]   置換モード\n"
+        "  FastReplacer <フォルダ> -f <検索> [-f <検索2> ...] -s [オプション]          検索のみ (レポート出力)\n"
         "\n"
         "オプション:\n"
-        "  -f, --find <text>      検索文字列 (必須)\n"
+        "  -f, --find <text>      検索文字列 (必須、複数指定可。全て同じ置換文字列に置き換える)\n"
         "  -r, --replace <text>   置換文字列 (空文字列可 = 削除)\n"
         "  -s, --search-only      検索のみ。結果をレポートファイルに書き出す\n"
         "  -c, --match-case       大文字/小文字を区別する (既定: 区別しない)\n"
@@ -71,10 +76,15 @@ void PrintUsage()
         "  -R, --recursive        サブフォルダも対象にする (既定: 指定フォルダ直下のみ)\n"
         "  -e, --escape           検索/置換文字列のエスケープを解釈する\n"
         "                         (\\\\ \\n \\r \\t \\0 \\xHH \\uXXXX \\UXXXXXXXX)\n"
+        "  -x, --context          レポートに前後の文脈を出力する (既定: 位置のみ)\n"
         "  -o, --report <path>    レポートファイルのパス\n"
         "                         (既定: カレントに FastReplacer_report_<日時>.txt。置換モードは指定時のみ出力)\n"
         "  -t, --threads <n>      スレッド数 (既定: 論理コア数)\n"
+        "      --mmap             RAM への一括読み込みを行わず、メモリマップで読む\n"
         "  -h, --help             このヘルプ\n"
+        "\n"
+        "短いオプションはまとめて指定できる (例: -cwR)。値を取るオプションをまとめた場合、\n"
+        "値は後続の引数から順に取る (例: -rc <置換>、-fr <検索> <置換>)。\n"
         "\n"
         "終了コード: 0=成功 1=一部ファイルでエラー 2=引数エラー\n",
         stdout);
@@ -140,67 +150,150 @@ bool ParseEscapes(const std::string& in, std::string& out, std::string& err)
     return true;
 }
 
+// 戻り値: 0=続行 1=ヘルプ表示済み 2=エラー
 int ParseArgs(const std::vector<std::string>& a, Config& cfg)
 {
+    enum Opt
+    {
+        kFind,
+        kReplace,
+        kSearch,
+        kCase,
+        kWord,
+        kRec,
+        kEsc,
+        kCtx,
+        kReport,
+        kThreads,
+        kMmap,
+        kChunk,
+        kMem,
+        kHelp,
+        kNone
+    };
+    struct Def
+    {
+        char shortName;
+        const char* longName;
+        Opt opt;
+        bool value;
+    };
+    static const Def defs[] = {
+        {'f', "find", kFind, true},          {'r', "replace", kReplace, true},  {'s', "search-only", kSearch, false},
+        {'c', "match-case", kCase, false},   {'w', "whole-word", kWord, false}, {'R', "recursive", kRec, false},
+        {'e', "escape", kEsc, false},        {'x', "context", kCtx, false},     {'o', "report", kReport, true},
+        {'t', "threads", kThreads, true},    {0, "mmap", kMmap, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
+        {0, "mem-limit", kMem, true},  // テスト用 (非公開)
+        {'h', "help", kHelp, false},
+    };
+
     bool hasFind = false;
+    auto apply = [&](const Def& d, const std::string& v) -> int
+    {
+        switch (d.opt)
+        {
+        case kFind:
+            cfg.finds.push_back(v);
+            hasFind = true;
+            break;
+        case kReplace:
+            if (cfg.hasReplace)
+            {
+                std::fprintf(stderr, "エラー: -r は 1 つだけ指定できます\n");
+                return 2;
+            }
+            cfg.replace = v;
+            cfg.hasReplace = true;
+            break;
+        case kSearch: cfg.searchOnly = true; break;
+        case kCase: cfg.opt.matchCase = true; break;
+        case kWord: cfg.opt.wholeWord = true; break;
+        case kRec: cfg.recursive = true; break;
+        case kEsc: cfg.escapes = true; break;
+        case kCtx: cfg.context = true; break;
+        case kReport: cfg.reportPath = v; break;
+        case kThreads: cfg.threads = (unsigned)std::strtoul(v.c_str(), nullptr, 10); break;
+        case kMmap: cfg.forceMmap = true; break;
+        case kChunk: cfg.chunk = std::max<uint64_t>(1, std::strtoull(v.c_str(), nullptr, 10)); break;
+        case kMem:
+            cfg.memLimit = std::strtoull(v.c_str(), nullptr, 10);
+            cfg.hasMemLimit = true;
+            break;
+        case kHelp: PrintUsage(); return 1;
+        default: break;
+        }
+        return 0;
+    };
+
     for (size_t i = 1; i < a.size(); ++i)
     {
         const std::string& s = a[i];
-        auto need = [&](std::string& dst) -> bool
-        {
-            if (i + 1 >= a.size())
-            {
-                std::fprintf(stderr, "エラー: %s に値がありません\n", s.c_str());
-                return false;
-            }
-            dst = a[++i];
-            return true;
-        };
-        if (s == "-h" || s == "--help" || s == "/?")
+        if (s == "/?")
         {
             PrintUsage();
             return 1;
         }
-        else if (s == "-f" || s == "--find")
+        if (s.size() > 2 && s[0] == '-' && s[1] == '-')
         {
-            if (!need(cfg.find)) return 2;
-            hasFind = true;
-        }
-        else if (s == "-r" || s == "--replace")
-        {
-            if (!need(cfg.replace)) return 2;
-            cfg.hasReplace = true;
-        }
-        else if (s == "-s" || s == "--search-only")
-            cfg.searchOnly = true;
-        else if (s == "-c" || s == "--match-case")
-            cfg.opt.matchCase = true;
-        else if (s == "-w" || s == "--whole-word")
-            cfg.opt.wholeWord = true;
-        else if (s == "-R" || s == "--recursive")
-            cfg.recursive = true;
-        else if (s == "-e" || s == "--escape")
-            cfg.escapes = true;
-        else if (s == "-o" || s == "--report")
-        {
-            if (!need(cfg.reportPath)) return 2;
-        }
-        else if (s == "-t" || s == "--threads")
-        {
+            // 長いオプション (--name / --name=value)
+            const size_t eq = s.find('=');
+            const std::string name = s.substr(2, eq == std::string::npos ? std::string::npos : eq - 2);
+            const Def* d = nullptr;
+            for (const Def& x : defs)
+                if (name == x.longName) d = &x;
+            if (!d)
+            {
+                std::fprintf(stderr, "エラー: 不明なオプション %s\n", s.c_str());
+                return 2;
+            }
             std::string v;
-            if (!need(v)) return 2;
-            cfg.threads = (unsigned)std::strtoul(v.c_str(), nullptr, 10);
+            if (d->value)
+            {
+                if (eq != std::string::npos)
+                    v = s.substr(eq + 1);
+                else if (i + 1 < a.size())
+                    v = a[++i];
+                else
+                {
+                    std::fprintf(stderr, "エラー: --%s に値がありません\n", d->longName);
+                    return 2;
+                }
+            }
+            else if (eq != std::string::npos)
+            {
+                std::fprintf(stderr, "エラー: --%s は値を取りません\n", d->longName);
+                return 2;
+            }
+            if (int r = apply(*d, v)) return r;
         }
-        else if (s == "--chunk-size")  // テスト用 (非公開)
+        else if (s.size() > 1 && s[0] == '-')
         {
-            std::string v;
-            if (!need(v)) return 2;
-            cfg.chunk = std::max<uint64_t>(1, std::strtoull(v.c_str(), nullptr, 10));
-        }
-        else if (!s.empty() && s[0] == '-' && s.size() > 1)
-        {
-            std::fprintf(stderr, "エラー: 不明なオプション %s\n", s.c_str());
-            return 2;
+            // 短いオプション (まとめ指定可)。値を取るものは後続の引数から順に値を取る
+            std::vector<const Def*> needValue;
+            for (size_t k = 1; k < s.size(); ++k)
+            {
+                const Def* d = nullptr;
+                for (const Def& x : defs)
+                    if (x.shortName && x.shortName == s[k]) d = &x;
+                if (!d)
+                {
+                    std::fprintf(stderr, "エラー: 不明なオプション -%c (%s)\n", s[k], s.c_str());
+                    return 2;
+                }
+                if (d->value)
+                    needValue.push_back(d);
+                else if (int r = apply(*d, std::string()))
+                    return r;
+            }
+            for (const Def* d : needValue)
+            {
+                if (i + 1 >= a.size())
+                {
+                    std::fprintf(stderr, "エラー: -%c に値がありません\n", d->shortName);
+                    return 2;
+                }
+                if (int r = apply(*d, a[++i])) return r;
+            }
         }
         else if (cfg.folder.empty())
             cfg.folder = s;
@@ -223,12 +316,15 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
     if (cfg.escapes)
     {
         std::string err, t;
-        if (!ParseEscapes(cfg.find, t, err))
+        for (size_t k = 0; k < cfg.finds.size(); ++k)
         {
-            std::fprintf(stderr, "エラー: 検索文字列: %s\n", err.c_str());
-            return 2;
+            if (!ParseEscapes(cfg.finds[k], t, err))
+            {
+                std::fprintf(stderr, "エラー: 検索文字列 #%zu: %s\n", k + 1, err.c_str());
+                return 2;
+            }
+            cfg.finds[k] = t;
         }
-        cfg.find = t;
         if (!ParseEscapes(cfg.replace, t, err))
         {
             std::fprintf(stderr, "エラー: 置換文字列: %s\n", err.c_str());
@@ -500,7 +596,7 @@ void AppendContext(std::string& out, const uint8_t* t, uint64_t n, const Match& 
 }
 
 // ============================================================================
-// ファイル処理
+// ファイル処理 (読み込み → 検索 → 出力 の 3 段パイプライン。段ごとにファイル順を保つ)
 // ============================================================================
 struct FileStat
 {
@@ -510,41 +606,241 @@ struct FileStat
     double seconds = 0;
     bool error = false;
     std::string message;
+    const char* mode = "";
+};
+
+struct Job
+{
+    NativePath path;
+    plat::InputFile in;
+    std::chrono::steady_clock::time_point t0;
+    uint64_t charged = 0;  // メモリ予算に計上したバイト数
+
+    // 読み込み進捗 (先頭から順に完了する)
+    std::mutex mu;
+    std::condition_variable cv;
+    uint64_t loaded = 0;  // 先頭から読み込み済みのバイト数
+    bool loadEnded = false;
+    bool loadFailed = false;
+    std::string loadErr;
+
+    std::vector<Match> all;
+    FileStat st;
+
+    // [0, end) が読み込まれるまで待つ。読み込み失敗なら false
+    bool WaitLoaded(uint64_t end)
+    {
+        std::unique_lock<std::mutex> lk(mu);
+        cv.wait(lk, [&] { return loaded >= end || loadEnded; });
+        return loaded >= end && !loadFailed;
+    }
+    void SetLoaded(uint64_t v)
+    {
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            loaded = v;
+        }
+        cv.notify_all();
+    }
+    void EndLoad(bool failed, const std::string& e)
+    {
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            loadEnded = true;
+            loadFailed = failed;
+            loadErr = e;
+        }
+        cv.notify_all();
+    }
 };
 
 class Processor
 {
 public:
-    Processor(const Config& cfg, const Matcher& m) : cfg_(cfg), m_(m) {}
+    Processor(const Config& cfg, const MultiMatcher& m, plat::TextWriter* report, uint64_t memLimit)
+        : cfg_(cfg), m_(m), report_(report), memLimit_(memLimit)
+    {
+    }
 
-    FileStat Process(const NativePath& path, plat::TextWriter* report);
+    // 全ファイルを処理し、ファイル順に onFileDone(i, stat) を呼ぶ (出力段のスレッドから)
+    void Run(const std::vector<NativePath>& files, const std::function<void(size_t, const FileStat&)>& onFileDone);
 
 private:
-    void FindMatches(const uint8_t* t, uint64_t n, std::vector<Match>& all, const plat::MappedFile& mf);
-    void WriteSearchReport(const uint8_t* t, uint64_t n, const std::vector<Match>& all, const NativePath& path, plat::TextWriter& rep);
-    bool WriteReplaced(const uint8_t* t, uint64_t n, const std::vector<Match>& all, const NativePath& tmp, uint64_t newSize,
-                       std::string& err);
+    static constexpr size_t kMaxInFlight = 3;  // 同時に保持するファイル数 (読み込み/検索/出力)
+    static constexpr unsigned kQueueDepth = 16;
+
+    void LoaderLane();
+    void SearchLane();
+    void OutputLane(const std::function<void(size_t, const FileStat&)>& onFileDone);
+
+    void FindMatches(Job& job);
+    void WriteSearchReport(const Job& job, plat::TextWriter& rep);
+    bool WriteReplaced(const Job& job, const NativePath& tmp, uint64_t newSize, std::string& err);
+    void Output(Job& job);
+    uint64_t ReadUnit() const
+    {
+        const uint64_t u = (cfg_.chunk + 4095) & ~4095ull;
+        return std::min<uint64_t>(std::max<uint64_t>(u, 4096), 8ull << 20);
+    }
 
     const Config& cfg_;
-    const Matcher& m_;
+    const MultiMatcher& m_;
+    plat::TextWriter* report_;
+    const uint64_t memLimit_;
+
+    std::vector<std::unique_ptr<Job>> jobs_;
+    // 段の進行管理
+    std::mutex mu_;
+    std::condition_variable cv_;
+    size_t prepared_ = 0;  // 読み込み準備 (Open/確保) を終えたジョブ数
+    size_t searched_ = 0;  // 検索を終えたジョブ数
+    size_t released_ = 0;  // 出力を終えて解放したジョブ数
+    uint64_t inUse_ = 0;   // RAM バッファの合計
 };
 
-void Processor::FindMatches(const uint8_t* t, uint64_t n, std::vector<Match>& all, const plat::MappedFile& mf)
+void Processor::Run(const std::vector<NativePath>& files, const std::function<void(size_t, const FileStat&)>& onFileDone)
 {
+    jobs_.clear();
+    for (const auto& f : files)
+    {
+        jobs_.push_back(std::make_unique<Job>());
+        jobs_.back()->path = f;
+    }
+    std::thread loader([&] { LoaderLane(); });
+    std::thread output([&] { OutputLane(onFileDone); });
+    SearchLane();
+    loader.join();
+    output.join();
+}
+
+void Processor::LoaderLane()
+{
+    for (size_t i = 0; i < jobs_.size(); ++i)
+    {
+        Job& job = *jobs_[i];
+        {
+            std::unique_lock<std::mutex> lk(mu_);
+            cv_.wait(lk, [&] { return i < released_ + kMaxInFlight; });
+        }
+        job.t0 = std::chrono::steady_clock::now();
+        std::string err;
+        bool ok = job.in.Open(job.path, err);
+        bool ram = false;
+        if (ok)
+        {
+            const uint64_t n = job.in.Size();
+            const uint64_t need = ((n + 4095) & ~4095ull) + 4096;
+            if (!cfg_.forceMmap && n > 0 && need <= memLimit_)
+            {
+                // 予算が空くまで待つ (先行ファイルの出力完了で解放される)
+                std::unique_lock<std::mutex> lk(mu_);
+                cv_.wait(lk, [&] { return inUse_ + need <= memLimit_; });
+                inUse_ += need;
+                job.charged = need;
+                ram = true;
+            }
+            if (ram && !job.in.PrepareRam(err))
+            {
+                // 確保できなければメモリマップへ
+                std::lock_guard<std::mutex> lk(mu_);
+                inUse_ -= job.charged;
+                job.charged = 0;
+                ram = false;
+            }
+            if (!ram) ok = job.in.PrepareMapped(err);
+        }
+        job.st.mode = !ok ? "" : ram ? "RAM" : "mmap";
+        if (!ok) job.EndLoad(true, err);
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            prepared_ = i + 1;
+        }
+        cv_.notify_all();
+        if (!ok) continue;
+        if (!ram)
+        {
+            job.SetLoaded(job.in.Size());
+            job.EndLoad(false, std::string());
+            continue;
+        }
+        const uint64_t unit = ReadUnit();
+        const uint64_t n = job.in.Size();
+        const bool lok = job.in.Load(unit, kQueueDepth, [&](size_t idx) { job.SetLoaded(std::min(n, (uint64_t)(idx + 1) * unit)); }, err);
+        job.EndLoad(!lok, err);
+    }
+}
+
+void Processor::SearchLane()
+{
+    for (size_t i = 0; i < jobs_.size(); ++i)
+    {
+        Job& job = *jobs_[i];
+        {
+            std::unique_lock<std::mutex> lk(mu_);
+            cv_.wait(lk, [&] { return prepared_ > i; });
+        }
+        if (*job.st.mode && job.in.Size() > 0) FindMatches(job);  // 準備に失敗したジョブは mode が空
+        job.WaitLoaded(UINT64_MAX);  // 読み込み終了 (成否) を待つ
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            searched_ = i + 1;
+        }
+        cv_.notify_all();
+    }
+}
+
+void Processor::OutputLane(const std::function<void(size_t, const FileStat&)>& onFileDone)
+{
+    for (size_t i = 0; i < jobs_.size(); ++i)
+    {
+        Job& job = *jobs_[i];
+        {
+            std::unique_lock<std::mutex> lk(mu_);
+            cv_.wait(lk, [&] { return searched_ > i; });
+        }
+        Output(job);
+        job.in.Close();
+        job.st.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - job.t0).count();
+        onFileDone(i, job.st);
+        std::vector<Match>().swap(job.all);
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            inUse_ -= job.charged;
+            job.charged = 0;
+            released_ = i + 1;
+        }
+        cv_.notify_all();
+    }
+}
+
+void Processor::FindMatches(Job& job)
+{
+    const uint8_t* t = job.in.Data();
+    const uint64_t n = job.in.Size();
     const uint64_t cs = cfg_.chunk;
     const size_t nChunks = (size_t)((n + cs - 1) / cs);
     std::vector<std::vector<Match>> per(nChunks);
+    std::atomic<bool> failed{false};
+    const uint64_t margin = (uint64_t)m_.MaxLen() + 64;  // 照合・SIMD 読み込み・単語境界判定で参照する末尾側の余白
     ParallelFor(cfg_.threads, nChunks,
                 [&](size_t c)
                 {
+                    if (failed.load(std::memory_order_relaxed)) return;
                     const uint64_t b = c * cs, e = std::min(n, b + cs);
-                    mf.Prefetch(b, e - b + m_.MaxLen());
+                    if (!job.WaitLoaded(std::min(n, e + margin)))
+                    {
+                        failed = true;
+                        return;
+                    }
+                    job.in.Prefetch(b, e - b + m_.MaxLen());
                     m_.FindAll(t, n, b, e, per[c]);
                 });
+    if (failed) return;
 
     // チャンク境界をまたぐ重なりを解消 (逐次スキャンと完全に同じ結果にする)
     size_t total = 0;
     for (auto& v : per) total += v.size();
+    std::vector<Match>& all = job.all;
     all.clear();
     all.reserve(total);
     uint64_t lastEnd = 0;
@@ -581,10 +877,14 @@ void Processor::FindMatches(const uint8_t* t, uint64_t n, std::vector<Match>& al
     }
 }
 
-void Processor::WriteSearchReport(const uint8_t* t, uint64_t n, const std::vector<Match>& all, const NativePath& path, plat::TextWriter& rep)
+void Processor::WriteSearchReport(const Job& job, plat::TextWriter& rep)
 {
+    const uint8_t* t = job.in.Data();
+    const uint64_t n = job.in.Size();
+    const std::vector<Match>& all = job.all;
     const uint64_t cs = cfg_.chunk;
     const size_t nChunks = (size_t)((n + cs - 1) / cs);
+    const bool multi = m_.Count() > 1;
 
     // 1) チャンクごとの改行数と「最後の改行以降の文字数」
     struct Sum
@@ -624,17 +924,34 @@ void Processor::WriteSearchReport(const uint8_t* t, uint64_t n, const std::vecto
         col = sums[c].nl ? sums[c].tailChars : col + sums[c].tailChars;
     }
 
-    // 3) 並列に整形しつつ順に書き出す
-    char head[128];
-    std::snprintf(head, sizeof(head), "  (%llu 件, %s)\n", (unsigned long long)all.size(), FormatBytes(n).c_str());
-    rep.Write("=== " + plat::ToUtf8(path) + head);
+    // 3) 見出し (複数パターン時は内訳も)
+    std::string head = "=== " + plat::ToUtf8(job.path) + "  (";
+    AppendU64(head, all.size());
+    head += " 件";
+    if (multi)
+    {
+        std::vector<uint64_t> cnt(m_.Count(), 0);
+        for (const Match& m : all) ++cnt[m.pat];
+        head += ":";
+        for (size_t k = 0; k < cnt.size(); ++k)
+        {
+            head += " #";
+            AppendU64(head, k + 1);
+            head += "=";
+            AppendU64(head, cnt[k]);
+        }
+    }
+    head += ", " + FormatBytes(n) + ")\n";
+    rep.Write(head);
+
+    // 4) 並列に整形しつつ順に書き出す
     OrderedPipeline<std::string>(
         cfg_.threads, nChunks,
         [&](size_t c, std::string& out)
         {
             const Sum& s = sums[c];
             if (s.mBegin == s.mEnd) return;
-            out.reserve((s.mEnd - s.mBegin) * 160);
+            out.reserve((s.mEnd - s.mBegin) * (cfg_.context ? 160 : 32));
             uint64_t pos = c * cs, ln = baseLine[c], cl = carryCol[c];
             for (size_t k = s.mBegin; k < s.mEnd; ++k)
             {
@@ -656,8 +973,16 @@ void Processor::WriteSearchReport(const uint8_t* t, uint64_t n, const std::vecto
                 AppendU64(out, cl + 1);
                 out += "  @";
                 AppendU64(out, m.pos);
-                out += "  ";
-                AppendContext(out, t, n, m);
+                if (multi)
+                {
+                    out += "  #";
+                    AppendU64(out, (uint64_t)m.pat + 1);
+                }
+                if (cfg_.context)
+                {
+                    out += "  ";
+                    AppendContext(out, t, n, m);
+                }
                 out.push_back('\n');
             }
         },
@@ -669,9 +994,10 @@ void Processor::WriteSearchReport(const uint8_t* t, uint64_t n, const std::vecto
     rep.Write("\n");
 }
 
-bool Processor::WriteReplaced(const uint8_t* t, uint64_t n, const std::vector<Match>& all, const NativePath& tmp, uint64_t newSize,
-                              std::string& err)
+bool Processor::WriteReplaced(const Job& job, const NativePath& tmp, uint64_t newSize, std::string& err)
 {
+    const uint8_t* t = job.in.Data();
+    const std::vector<Match>& all = job.all;
     const std::string& rep = cfg_.replace;
     const uint64_t rl = rep.size();
     const size_t M = all.size();
@@ -736,12 +1062,6 @@ bool Processor::WriteReplaced(const uint8_t* t, uint64_t n, const std::vector<Ma
                     std::memcpy(d, t + prevIn + (o - prevOut), (size_t)(e - o));
                     d += e - o;
                     o = e;
-                    if (i < M && rl == 0 && o == outStart[i])
-                    {
-                        prevIn = all[i].pos + all[i].len;
-                        prevOut = o;
-                        ++i;
-                    }
                 }
             }
         },
@@ -754,7 +1074,6 @@ bool Processor::WriteReplaced(const uint8_t* t, uint64_t n, const std::vector<Ma
             }
             return out.WriteBlock(blk.p, blk.n, err);
         });
-    (void)n;
     if (!ok)
     {
         out.Abort();
@@ -763,60 +1082,51 @@ bool Processor::WriteReplaced(const uint8_t* t, uint64_t n, const std::vector<Ma
     return out.Finish(err);
 }
 
-FileStat Processor::Process(const NativePath& path, plat::TextWriter* report)
+void Processor::Output(Job& job)
 {
-    FileStat st;
-    const auto t0 = std::chrono::steady_clock::now();
-    plat::MappedFile mf;
-    std::string err;
-    if (!mf.Open(path, err))
+    FileStat& st = job.st;
+    st.size = st.newSize = job.in.Size();
+    if (job.loadFailed)
     {
         st.error = true;
-        st.message = err;
-        return st;
+        st.message = job.loadErr;
+        return;
     }
-    const uint8_t* t = mf.Data();
-    const uint64_t n = mf.Size();
-    st.size = st.newSize = n;
-
-    std::vector<Match> all;
-    if (n > 0) FindMatches(t, n, all, mf);
-    st.matches = all.size();
-
+    st.matches = job.all.size();
     if (cfg_.searchOnly)
     {
-        if (report && !all.empty()) WriteSearchReport(t, n, all, path, *report);
+        if (report_ && !job.all.empty()) WriteSearchReport(job, *report_);
+        return;
     }
-    else if (!all.empty())
+    if (job.all.empty()) return;
+
+    uint64_t removed = 0;
+    for (const Match& m : job.all) removed += m.len;
+    st.newSize = st.size - removed + (uint64_t)job.all.size() * cfg_.replace.size();
+    const NativePath tmp = job.path + FR_NATIVE(".frtmp");
+    std::string err;
+    if (!WriteReplaced(job, tmp, st.newSize, err))
     {
-        uint64_t removed = 0;
-        for (const Match& m : all) removed += m.len;
-        st.newSize = n - removed + (uint64_t)all.size() * cfg_.replace.size();
-        const NativePath tmp = path + FR_NATIVE(".frtmp");
-        if (!WriteReplaced(t, n, all, tmp, st.newSize, err))
+        plat::DeleteFileQuiet(tmp);
+        st.error = true;
+        st.message = err;
+    }
+    else
+    {
+        job.in.Close();  // 置き換え前にハンドル/マップを解放
+        if (!plat::ReplaceWith(job.path, tmp, err))
         {
-            plat::DeleteFileQuiet(tmp);
             st.error = true;
             st.message = err;
         }
-        else
-        {
-            mf.Close();
-            if (!plat::ReplaceWith(path, tmp, err))
-            {
-                st.error = true;
-                st.message = err;
-            }
-        }
-        if (report)
-        {
-            char buf[160];
-            std::snprintf(buf, sizeof(buf), "\t%llu\t%s\n", (unsigned long long)all.size(), st.error ? "ERROR" : "OK");
-            report->Write(plat::ToUtf8(path) + buf);
-        }
     }
-    st.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    return st;
+    if (report_)
+    {
+        std::string line = plat::ToUtf8(job.path) + "\t";
+        AppendU64(line, job.all.size());
+        line += st.error ? "\tERROR\n" : "\tOK\n";
+        report_->Write(line);
+    }
 }
 
 bool EndsWith(const NativePath& s, const NativePath& suf) { return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0; }
@@ -826,11 +1136,16 @@ int Run(const std::vector<std::string>& args)
     Config cfg;
     if (int r = ParseArgs(args, cfg)) return r == 1 ? 0 : r;
 
-    std::u32string pat;
-    if (!utf8::Decode(cfg.find, pat))
+    std::vector<std::u32string> pats;
+    for (size_t k = 0; k < cfg.finds.size(); ++k)
     {
-        std::fprintf(stderr, "エラー: 検索文字列が UTF-8 として不正です\n");
-        return 2;
+        std::u32string p;
+        if (!utf8::Decode(cfg.finds[k], p))
+        {
+            std::fprintf(stderr, "エラー: 検索文字列 #%zu が UTF-8 として不正です\n", k + 1);
+            return 2;
+        }
+        pats.push_back(std::move(p));
     }
     {
         std::u32string tmp;
@@ -840,9 +1155,9 @@ int Run(const std::vector<std::string>& args)
             return 2;
         }
     }
-    Matcher matcher;
+    MultiMatcher matcher;
     std::string err;
-    if (!matcher.Compile(pat, cfg.opt, err))
+    if (!matcher.Compile(pats, cfg.opt, err))
     {
         std::fprintf(stderr, "エラー: %s\n", err.c_str());
         return 2;
@@ -863,7 +1178,7 @@ int Run(const std::vector<std::string>& args)
 
     // レポート
     plat::TextWriter report;
-    bool useReport = cfg.searchOnly || !cfg.reportPath.empty();
+    const bool useReport = cfg.searchOnly || !cfg.reportPath.empty();
     NativePath reportPath;
     if (useReport)
     {
@@ -880,10 +1195,14 @@ int Run(const std::vector<std::string>& args)
                                [&](const NativePath& f) { return (useReport && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
                 files.end());
 
+    // RAM 読み込みの予算 (既定: 起動時の空き物理メモリの 80%)
+    const uint64_t memLimit = cfg.forceMmap ? 0 : cfg.hasMemLimit ? cfg.memLimit : plat::AvailableMemory() / 10 * 8;
+
     const char* mode = cfg.searchOnly ? "検索のみ" : "置換";
-    std::printf("FastReplacer  モード: %s  大小区別: %s  単語単位: %s  スレッド: %u  AVX2: %s\n", mode, cfg.opt.matchCase ? "ON" : "OFF",
-                cfg.opt.wholeWord ? "ON" : "OFF", cfg.threads, simd::HasAvx2() ? "ON" : "OFF");
-    std::printf("フォルダ: %s  (%zu ファイル)\n", plat::ToUtf8(dir).c_str(), files.size());
+    std::printf("FastReplacer  モード: %s  大小区別: %s  単語単位: %s  検索文字列: %zu 個  スレッド: %u  AVX2: %s\n", mode,
+                cfg.opt.matchCase ? "ON" : "OFF", cfg.opt.wholeWord ? "ON" : "OFF", cfg.finds.size(), cfg.threads, simd::HasAvx2() ? "ON" : "OFF");
+    std::printf("フォルダ: %s  (%zu ファイル)  読み込み: %s\n", plat::ToUtf8(dir).c_str(), files.size(),
+                cfg.forceMmap ? "メモリマップ" : ("RAM 直接 (上限 " + FormatBytes(memLimit) + ", 超過時はメモリマップ)").c_str());
     std::fflush(stdout);
 
     if (useReport)
@@ -893,9 +1212,14 @@ int Run(const std::vector<std::string>& args)
         h += "日時      : " + NowString(false) + "\n";
         h += std::string("モード    : ") + mode + "\n";
         h += "フォルダ  : " + plat::ToUtf8(dir) + (cfg.recursive ? "  (サブフォルダ含む)" : "") + "\n";
-        h += "検索      : ";
-        AppendVisible(h, (const uint8_t*)cfg.find.data(), cfg.find.size());
-        h += "\n";
+        for (size_t k = 0; k < cfg.finds.size(); ++k)
+        {
+            h += "検索 #";
+            AppendU64(h, k + 1);
+            h += "  : ";
+            AppendVisible(h, (const uint8_t*)cfg.finds[k].data(), cfg.finds[k].size());
+            h += "\n";
+        }
         if (!cfg.searchOnly)
         {
             h += "置換      : ";
@@ -904,36 +1228,40 @@ int Run(const std::vector<std::string>& args)
         }
         h += std::string("大小区別  : ") + (cfg.opt.matchCase ? "ON" : "OFF") + "\n";
         h += std::string("単語単位  : ") + (cfg.opt.wholeWord ? "ON" : "OFF") + "\n";
-        h += cfg.searchOnly ? "書式      : L<行>:C<列(文字)>  @<バイトオフセット>  <前後の文脈>【一致】\n\n"
-                            : "\n<ファイル>\t<置換数>\t<結果>\n";
+        if (cfg.searchOnly)
+        {
+            h += "書式      : L<行>:C<列(文字)>  @<バイトオフセット>";
+            if (cfg.finds.size() > 1) h += "  #<検索文字列番号>";
+            if (cfg.context) h += "  <前後の文脈>【一致】";
+            h += "\n\n";
+        }
+        else
+            h += "\n<ファイル>\t<置換数>\t<結果>\n";
         report.Write(h);
     }
 
-    Processor proc(cfg, matcher);
+    Processor proc(cfg, matcher, useReport ? &report : nullptr, memLimit);
     const auto t0 = std::chrono::steady_clock::now();
     uint64_t totalBytes = 0, totalMatches = 0, hitFiles = 0, errFiles = 0;
     std::vector<std::string> errors;
-    for (size_t i = 0; i < files.size(); ++i)
-    {
-        FileStat st = proc.Process(files[i], useReport ? &report : nullptr);
-        const std::string name = plat::ToUtf8(files[i]);
-        if (st.error)
-        {
-            ++errFiles;
-            errors.push_back(name + " : " + st.message);
-            std::printf("[%zu/%zu] %s : エラー: %s\n", i + 1, files.size(), name.c_str(), st.message.c_str());
-        }
-        else
-        {
-            const double gbps = st.seconds > 0 ? st.size / st.seconds / 1e9 : 0;
-            std::printf("[%zu/%zu] %s : %llu 件%s  (%s, %.2f s, %.2f GB/s)\n", i + 1, files.size(), name.c_str(), (unsigned long long)st.matches,
-                        (!cfg.searchOnly && st.matches) ? " 置換" : "", FormatBytes(st.size).c_str(), st.seconds, gbps);
-        }
-        std::fflush(stdout);
-        totalBytes += st.size;
-        totalMatches += st.matches;
-        hitFiles += st.matches ? 1 : 0;
-    }
+    proc.Run(files,
+             [&](size_t i, const FileStat& st)
+             {
+                 const std::string name = plat::ToUtf8(files[i]);
+                 if (st.error)
+                 {
+                     ++errFiles;
+                     errors.push_back(name + " : " + st.message);
+                     std::printf("[%zu/%zu] %s : エラー: %s\n", i + 1, files.size(), name.c_str(), st.message.c_str());
+                 }
+                 else
+                     std::printf("[%zu/%zu] %s : %llu 件%s  (%s, %s, %.2f s)\n", i + 1, files.size(), name.c_str(), (unsigned long long)st.matches,
+                                 (!cfg.searchOnly && st.matches) ? " 置換" : "", FormatBytes(st.size).c_str(), st.mode, st.seconds);
+                 std::fflush(stdout);
+                 totalBytes += st.size;
+                 totalMatches += st.matches;
+                 hitFiles += st.matches ? 1 : 0;
+             });
     const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 
     char sum[256];

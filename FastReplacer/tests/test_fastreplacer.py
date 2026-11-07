@@ -56,25 +56,33 @@ def units(data: bytes):
     return out
 
 
-def ref_find(data: bytes, pat: str, match_case: bool, whole_word: bool):
+def ref_find(data: bytes, pats, match_case: bool, whole_word: bool):
+    """最左一致、同位置なら最長 (同長なら先の番号)。戻り値 [(byte_off, byte_len, pat_idx)]"""
     us = units(data)
-    p = [ord(c) for c in pat]
     n = len(us)
-    w_start, w_end = is_word(p[0]), is_word(p[-1])
+    cps = [[ord(c) for c in p] for p in pats]
     res = []
     i = 0
-    while i + len(p) <= n:
-        ok = all(eq_cp(us[i + k][0], p[k], match_case) for k in range(len(p)))
-        if ok and whole_word:
-            if w_start and i > 0 and is_word(us[i - 1][0]):
-                ok = False
-            if w_end and i + len(p) < n and is_word(us[i + len(p)][0]):
-                ok = False
-        if ok:
+    while i < n:
+        best = None
+        for k, p in enumerate(cps):
+            L = len(p)
+            if i + L > n:
+                continue
+            if not all(eq_cp(us[i + j][0], p[j], match_case) for j in range(L)):
+                continue
+            if whole_word:
+                if is_word(p[0]) and i > 0 and is_word(us[i - 1][0]):
+                    continue
+                if is_word(p[-1]) and i + L < n and is_word(us[i + L][0]):
+                    continue
             b = us[i][1]
-            e = us[i + len(p)][1] if i + len(p) < n else len(data)
-            res.append((b, e - b))
-            i += len(p)
+            e = us[i + L][1] if i + L < n else len(data)
+            if best is None or e - b > best[1]:
+                best = (b, e - b, k, L)
+        if best:
+            res.append(best[:3])
+            i += best[3]
         else:
             i += 1
     return res
@@ -89,7 +97,7 @@ def line_col(data: bytes, pos: int):
 
 def ref_replace(data: bytes, matches, rep: bytes):
     out, p = [], 0
-    for b, l in matches:
+    for b, l, _ in matches:
         out.append(data[p:b])
         out.append(rep)
         p = b + l
@@ -138,7 +146,7 @@ def esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
 
 
-REPORT_RE = re.compile(r"^  L(\d+):C(\d+)  @(\d+)  ")
+REPORT_RE = re.compile(r"^  L(\d+):C(\d+)  @(\d+)(?:  #(\d+))?(  .*)?$")
 
 
 def run_tool(cmd_prefix, args):
@@ -169,35 +177,69 @@ def main():
             d = os.path.join(root, "c%d" % case)
             os.makedirs(os.path.join(d, "sub"))
             files = {}
-            for k in range(rng.randint(1, 3)):
+            for k in range(rng.randint(1, 5)):
                 name = os.path.join(d, ("sub" if k == 2 else ""), "f%d.txt" % k)
                 files[name] = rand_text(rng, rng.choice([0, 1, 5, 50, 300, 3000, 40000]))
             for name, data in files.items():
                 with open(name, "wb") as f:
                     f.write(data)
             sample = max(files.values(), key=len)
-            pat = rand_pattern(rng, sample)
+            pats = [rand_pattern(rng, sample) for _ in range(rng.choice([1, 1, 2, 3]))]
+            if len(pats) > 1 and rng.random() < 0.6:
+                # 同じ位置で競合するパターン (接頭辞 / 延長) を混ぜて最長一致の選択を検証する
+                txt = sample.decode("utf-8", errors="replace").replace("\ufffd", "")
+                if len(txt) > 4:
+                    a0 = rng.randrange(len(txt) - 3)
+                    base = txt[a0:a0 + rng.randint(2, 5)]
+                    longer = txt[a0:a0 + len(base) + rng.randint(1, 3)]
+                    group = [base[:-1] or base, base, longer]
+                    rng.shuffle(group)
+                    pats[:2] = group[:2] if len(pats) == 2 else group[:3]
             rep = rng.choice(["", "X", "置換後", "longer-replacement", "\n", "a"])
             mc = rng.random() < 0.4
             ww = rng.random() < 0.4
             rec = rng.random() < 0.5
+            cx = rng.random() < 0.5
             chunk = rng.choice([1, 2, 3, 7, 16, 33, 64, 1000, 1 << 20])
             threads = rng.choice([1, 2, 3, 8])
-            opts = ["-e", "-t", str(threads), "--chunk-size", str(chunk)]
-            if mc:
-                opts.append("-c")
-            if ww:
-                opts.append("-w")
-            if rec:
-                opts.append("-R")
+            io = rng.choice([[], [], ["--mmap"], ["--mem-limit", "0"], ["--mem-limit", "9000"], ["--mem-limit", "70000"]])
+            flags = ["e"] + (["c"] if mc else []) + (["w"] if ww else []) + (["R"] if rec else [])
+            rng.shuffle(flags)
+            merge = rng.random() < 0.5
+
+            def build(mode_flag, value_opt=None, value=None):
+                """オプション列を生成 (まとめ指定・長い形式を混在させる)"""
+                fl = flags + [mode_flag] if mode_flag else list(flags)
+                args = []
+                rest_pats = list(pats)
+                if merge:
+                    tok = "-" + "".join(fl)
+                    vals = []
+                    if rng.random() < 0.5:
+                        tok += "f"
+                        vals.append(esc(rest_pats.pop(0)))
+                    if value_opt:
+                        tok += value_opt
+                        vals.append(value)
+                    args += [tok] + vals
+                else:
+                    args += ["-" + x for x in fl]
+                    if value_opt:
+                        args += ["-" + value_opt, value]
+                for p in rest_pats:
+                    args += (["--find=" + esc(p)] if rng.random() < 0.3 else ["-f", esc(p)])
+                return args + ["-t", str(threads), "--chunk-size", str(chunk)] + io
+
             targets = [n for n in files if rec or os.path.dirname(n) == d]
-            expect = {n: ref_find(files[n], pat, mc, ww) for n in targets}
+            expect = {n: ref_find(files[n], pats, mc, ww) for n in targets}
             total_matches += sum(len(v) for v in expect.values())
+            multi = len(pats) > 1
 
             # --- 検索 ---
             report = os.path.join(root, "rep%d.txt" % case)
-            r = run_tool(prefix, [to_tool_path(d, a.wine), "-f", esc(pat), "-s", "-o", to_tool_path(report, a.wine)] + opts)
-            ctx = "case=%d pat=%r mc=%s ww=%s chunk=%d threads=%d" % (case, pat, mc, ww, chunk, threads)
+            sargs = build("s" + ("x" if cx else "")) + ["-o", to_tool_path(report, a.wine)]
+            r = run_tool(prefix, [to_tool_path(d, a.wine)] + sargs)
+            ctx = "case=%d pats=%r mc=%s ww=%s cx=%s chunk=%d threads=%d io=%s args=%r" % (case, pats, mc, ww, cx, chunk, threads, io, sargs)
             if r.returncode != 0:
                 print("FAIL(search rc=%d) %s\n%s" % (r.returncode, ctx, r.stderr.decode("utf-8", "replace")))
                 env_fail += 1
@@ -211,16 +253,20 @@ def main():
                         got[cur] = []
                     m = REPORT_RE.match(raw)
                     if m:
-                        got[cur].append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+                        has_ctx = m.group(5) is not None
+                        if has_ctx != cx:
+                            got[cur].append("context-mismatch")
+                        got[cur].append((int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)) if m.group(4) else None))
             for n in targets:
-                exp = [(line_col(files[n], b) + (b,)) for b, _ in expect[n]]
+                exp = [(line_col(files[n], b) + (b, (k + 1) if multi else None)) for b, _, k in expect[n]]
                 if got.get(n, []) != exp:
                     print("FAIL(search) %s file=%s\n exp=%s\n got=%s" % (ctx, n, exp[:10], got.get(n, [])[:10]))
                     env_fail += 1
                     break
 
             # --- 置換 ---
-            r = run_tool(prefix, [to_tool_path(d, a.wine), "-f", esc(pat), "-r", esc(rep)] + opts)
+            rargs = build(None, "r", esc(rep))
+            r = run_tool(prefix, [to_tool_path(d, a.wine)] + rargs)
             if r.returncode != 0:
                 print("FAIL(replace rc=%d) %s\n%s" % (r.returncode, ctx, r.stdout.decode("utf-8", "replace")))
                 env_fail += 1
@@ -230,7 +276,7 @@ def main():
                     now = f.read()
                 want = ref_replace(data, expect[n], rep.encode("utf-8")) if n in expect else data
                 if now != want:
-                    print("FAIL(replace) %s file=%s" % (ctx, n))
+                    print("FAIL(replace) %s file=%s rargs=%r" % (ctx, n, rargs))
                     env_fail += 1
                     break
             leftovers = [x for x in os.listdir(d) if x.endswith(".frtmp")]
