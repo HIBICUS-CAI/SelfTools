@@ -103,5 +103,7 @@ namespace simd
 uint64_t CountByte(const uint8_t* p, uint64_t len, uint8_t b);
 uint64_t CountCodePoints(const uint8_t* p, uint64_t len);  // 継続バイト以外の数
 const uint8_t* FindLastByte(const uint8_t* p, uint64_t len, uint8_t b);  // 無ければ nullptr
+// [p, p+len) の改行で line を進め、col を「最後の改行以降のコードポイント数」に更新 (改行が無ければ加算)
+void AdvanceLineCol(const uint8_t* p, uint64_t len, uint64_t& line, uint64_t& col);
 bool HasAvx2();
 }  // namespace simd

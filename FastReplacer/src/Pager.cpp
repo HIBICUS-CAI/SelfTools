@@ -78,112 +78,242 @@ int TerminalWidth()
 
 namespace
 {
-// t[i] から 1 文字を表示用に変換 (制御文字は \t \r \n \xHH、不正 UTF-8 は \xHH)。戻り値: 消費バイト数
-uint64_t Piece(const uint8_t* t, uint64_t n, uint64_t i, std::string& s, int& w)
+const char kHex[] = "0123456789ABCDEF";
+
+// 妥当な UTF-8 列なら長さ (cp に値)、不正なら 0 (インライン版。前後文の生成は一致ごとに走るため)
+inline int Dec(const uint8_t* p, uint64_t avail, char32_t& cp)
 {
-    static const char kHex[] = "0123456789ABCDEF";
-    const uint8_t b = t[i];
-    s.clear();
-    if (b >= 0x20 && b < 0x7F)
+    const uint8_t b0 = p[0];
+    if (b0 < 0x80)
     {
-        s.push_back((char)b);
-        w = 1;
+        cp = b0;
         return 1;
+    }
+    if (b0 < 0xC2) return 0;
+    if (b0 < 0xE0)
+    {
+        if (avail < 2 || (p[1] & 0xC0) != 0x80) return 0;
+        cp = ((b0 & 0x1Fu) << 6) | (p[1] & 0x3Fu);
+        return 2;
+    }
+    if (b0 < 0xF0)
+    {
+        if (avail < 3 || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) return 0;
+        cp = ((b0 & 0x0Fu) << 12) | ((p[1] & 0x3Fu) << 6) | (p[2] & 0x3Fu);
+        if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return 0;
+        return 3;
+    }
+    if (b0 < 0xF5)
+    {
+        if (avail < 4 || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80 || (p[3] & 0xC0) != 0x80) return 0;
+        cp = ((b0 & 0x07u) << 18) | ((p[1] & 0x3Fu) << 12) | ((p[2] & 0x3Fu) << 6) | (p[3] & 0x3Fu);
+        if (cp < 0x10000 || cp > 0x10FFFF) return 0;
+        return 4;
+    }
+    return 0;
+}
+
+inline int Width(char32_t c)
+{
+    if (c < 0x300) return 1;
+    if (c >= 0x3041 && c <= 0x9FFF && c != 0x3099 && c != 0x309A) return 2;  // かな・漢字 (頻出)
+    return CharWidth(c);
+}
+
+// t[i] (i < lim) の 1 文字の表示幅と消費バイト数 (制御文字は \t \r \n \xHH、不正 UTF-8 は \xHH の幅)
+// E3..E9 で始まる 3 バイト列 (U+3000..U+9FFF: かな・漢字・全角記号) の幅。対象外なら -1
+inline int Cjk3Width(const uint8_t* p, uint64_t avail)
+{
+    if (p[0] < 0xE3 || p[0] > 0xE9 || avail < 3 || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) return -1;
+    if (p[0] == 0xE3)
+    {
+        if (p[1] == 0x82 && (p[2] == 0x99 || p[2] == 0x9A)) return 0;  // 結合用濁点・半濁点
+        if (p[1] == 0x80 && p[2] == 0xBF) return 1;                     // U+303F
+    }
+    return 2;
+}
+
+inline int PieceWidth(const uint8_t* t, uint64_t lim, uint64_t i, uint64_t& len)
+{
+    const uint8_t b = t[i];
+    len = 1;
+    if (b >= 0x20 && b < 0x7F) return 1;
+    if (const int cw = Cjk3Width(t + i, lim - i); cw >= 0)
+    {
+        len = 3;
+        return cw;
     }
     if (b >= 0x80)
     {
-        if (const int l = utf8::ValidLen(t + i, n - i))
+        char32_t cp;
+        if (const int l = Dec(t + i, lim - i, cp))
         {
-            s.assign((const char*)t + i, (size_t)l);
-            w = CharWidth(utf8::DecodeAt(t, n, i));
-            return (uint64_t)l;
+            len = (uint64_t)l;
+            return Width(cp);
         }
+        return 4;
     }
-    if (b == '\t')
-        s = "\\t";
-    else if (b == '\r')
-        s = "\\r";
-    else if (b == '\n')
-        s = "\\n";
-    else
+    return (b == '\t' || b == '\r' || b == '\n') ? 2 : 4;
+}
+
+// t[a, b) を表示用に変換して追加
+void EmitRange(std::string& out, const uint8_t* t, uint64_t a, uint64_t b)
+{
+    uint64_t run = a, i = a;
+    while (i < b)
     {
-        s = "\\x";
-        s.push_back(kHex[b >> 4]);
-        s.push_back(kHex[b & 15]);
+        const uint8_t c = t[i];
+        if (c >= 0x20 && c < 0x7F)
+        {
+            ++i;
+            continue;
+        }
+        if (c >= 0x80)
+        {
+            if (Cjk3Width(t + i, b - i) >= 0)
+            {
+                i += 3;
+                continue;
+            }
+            char32_t cp;
+            if (const int l = Dec(t + i, b - i, cp))
+            {
+                i += (uint64_t)l;
+                continue;
+            }
+        }
+        out.append((const char*)t + run, (size_t)(i - run));
+        if (c == '\t')
+            out += "\\t";
+        else if (c == '\r')
+            out += "\\r";
+        else if (c == '\n')
+            out += "\\n";
+        else
+        {
+            const char e[4] = {'\\', 'x', kHex[c >> 4], kHex[c & 15]};
+            out.append(e, 4);
+        }
+        run = ++i;
     }
-    w = (int)s.size();
-    return 1;
+    out.append((const char*)t + run, (size_t)(b - run));
+}
+
+// 前後文の範囲を決める
+struct Bounds
+{
+    int pad = 0;
+    uint64_t leftStart = 0;  // 左の文脈の開始位置
+    uint64_t matchEnd = 0;   // 表示する一致部分の終端 (切り詰め時は途中)
+    bool cut = false;        // 一致部分を切り詰めたか ("..")
+    uint64_t rightEnd = 0;   // 右の文脈の終端
+};
+
+void ComputeBounds(const uint8_t* t, uint64_t n, uint64_t pos, uint32_t len, int budget, Bounds& bd)
+{
+    if (budget < 1) budget = 1;
+    const uint64_t me = pos + len;
+    // 一致部分
+    int mw = 0;
+    uint64_t i = pos;
+    while (i < me)
+    {
+        uint64_t l;
+        const int w = PieceWidth(t, me, i, l);
+        if (mw + w > budget) break;
+        mw += w;
+        i += l;
+    }
+    if (i < me)
+    {
+        // 収まらない: ".." の分 (2 桁) を空けて切り詰める
+        bd.cut = true;
+        uint64_t j = pos;
+        int w2 = 0;
+        while (j < me)
+        {
+            uint64_t l;
+            const int w = PieceWidth(t, me, j, l);
+            if (w2 + w + 2 > budget) break;
+            w2 += w;
+            j += l;
+        }
+        bd.matchEnd = j;
+        bd.leftStart = pos;
+        bd.rightEnd = me;
+        return;
+    }
+    bd.matchEnd = me;
+    const int side = (budget - mw) / 2;
+    const int rightBudget = budget - mw - side;
+    // 左側: 一致位置から行頭方向へ
+    int lw = 0;
+    uint64_t k = pos;
+    while (k > 0)
+    {
+        uint64_t s = k - 1;
+        int w;
+        const uint8_t c = t[s];
+        if (c >= 0x20 && c < 0x7F)
+            w = 1;  // ASCII
+        else if (k >= 3 && (c & 0xC0) == 0x80 && (w = Cjk3Width(t + k - 3, 3)) >= 0)
+            s = k - 3;  // かな・漢字
+        else
+        {
+            while (s > 0 && (t[s] & 0xC0) == 0x80 && k - s < 4) --s;
+            char32_t cp;
+            if (Dec(t + s, k - s, cp) != (int)(k - s)) s = k - 1;  // 不正な列は 1 バイトずつ
+            if (t[s] == '\n') break;
+            uint64_t l;
+            w = PieceWidth(t, k, s, l);
+        }
+        if (lw + w > side) break;
+        lw += w;
+        k = s;
+    }
+    bd.leftStart = k;
+    bd.pad = side - lw;
+    // 右側: 一致の直後から行末方向へ (CRLF の \r は行末として扱う)
+    int rw = 0;
+    uint64_t r = me;
+    while (r < n)
+    {
+        if (t[r] == '\n' || (t[r] == '\r' && r + 1 < n && t[r + 1] == '\n')) break;
+        uint64_t l;
+        const int w = PieceWidth(t, n, r, l);
+        if (rw + w > rightBudget) break;
+        rw += w;
+        r += l;
+    }
+    bd.rightEnd = r;
 }
 }  // namespace
 
 void BuildContext(const uint8_t* t, uint64_t n, uint64_t pos, uint32_t len, int budget, Context& out)
 {
     out = Context();
-    if (budget < 1) budget = 1;
-    std::string pc;
-    int pw = 0;
-    // 一致部分
-    int mw = 0;
-    {
-        const uint64_t e = pos + len;
-        for (uint64_t i = pos; i < e;)
-        {
-            const uint64_t l = Piece(t, n, i, pc, pw);
-            if (mw + pw > budget)
-            {
-                // 収まらない: 末尾を ".." にして切り詰める
-                while (mw + 2 > budget && !out.match.empty())
-                {
-                    // 直前の 1 文字を落とす
-                    size_t k = out.match.size() - 1;
-                    while (k > 0 && ((uint8_t)out.match[k] & 0xC0) == 0x80) --k;
-                    out.match.resize(k);
-                    mw = TextWidth(out.match);
-                }
-                out.match += "..";
-                return;
-            }
-            out.match += pc;
-            mw += pw;
-            i += l;
-        }
-    }
-    const int side = (budget - mw) / 2;
-    const int rightBudget = budget - mw - side;
+    Bounds bd;
+    ComputeBounds(t, n, pos, len, budget, bd);
+    out.pad = bd.pad;
+    EmitRange(out.left, t, bd.leftStart, pos);
+    EmitRange(out.match, t, pos, bd.matchEnd);
+    if (bd.cut)
+        out.match += "..";
+    else
+        EmitRange(out.right, t, pos + len, bd.rightEnd);
+}
 
-    // 左側: 一致位置から行頭方向へ
-    {
-        std::string rev;  // 1 文字ずつ前に足していく
-        int lw = 0;
-        uint64_t i = pos;
-        while (i > 0)
-        {
-            uint64_t k = i - 1;
-            while (k > 0 && (t[k] & 0xC0) == 0x80 && i - k < 4) --k;
-            if (utf8::ValidLen(t + k, i - k) != (int)(i - k)) k = i - 1;  // 不正な列は 1 バイトずつ
-            if (t[k] == '\n') break;
-            Piece(t, i, k, pc, pw);  // [k, i) の範囲だけで解釈する
-            if (lw + pw > side) break;
-            rev.insert(0, pc);
-            lw += pw;
-            i = k;
-        }
-        out.left = std::move(rev);
-        out.pad = side - lw;
-    }
-    // 右側: 一致の直後から行末方向へ (CRLF の \r は行末として扱う)
-    {
-        int rw = 0;
-        for (uint64_t i = pos + len; i < n;)
-        {
-            if (t[i] == '\n' || (t[i] == '\r' && i + 1 < n && t[i + 1] == '\n')) break;
-            const uint64_t l = Piece(t, n, i, pc, pw);
-            if (rw + pw > rightBudget) break;
-            out.right += pc;
-            rw += pw;
-            i += l;
-        }
-    }
+void AppendContextText(std::string& out, const uint8_t* t, uint64_t n, uint64_t pos, uint32_t len, int budget)
+{
+    Bounds bd;
+    ComputeBounds(t, n, pos, len, budget, bd);
+    out.append((size_t)bd.pad, ' ');
+    EmitRange(out, t, bd.leftStart, pos);
+    out += "【";
+    EmitRange(out, t, pos, bd.matchEnd);
+    if (bd.cut) out += "..";
+    out += "】";
+    if (!bd.cut) EmitRange(out, t, pos + len, bd.rightEnd);
 }
 
 void AppendClipped(std::string& out, const std::string& s, uint64_t& col, uint64_t hscroll, uint64_t cols)

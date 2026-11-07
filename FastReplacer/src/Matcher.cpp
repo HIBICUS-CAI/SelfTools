@@ -204,8 +204,45 @@ static bool DetectAvx2()
 static const bool g_avx2 = DetectAvx2() && !std::getenv("FASTREPLACER_NO_AVX2");  // 環境変数で SSE2 経路を強制 (テスト用)
 bool HasAvx2() { return g_avx2; }
 
+// 32 バイトずつ比較結果 (0 / -1) を 8bit カウンタに溜め、255 回ごとに sad_epu8 で合算する
+// pred: 0 = 指定バイトと等しい、1 = UTF-8 の継続バイト以外 (コードポイント数)
+template <int Mode>
+FR_TARGET_AVX2 static uint64_t CountAvx2(const uint8_t* p, uint64_t len, uint8_t b)
+{
+    const __m256i nb = _mm256_set1_epi8((char)b);
+    const __m256i th = _mm256_set1_epi8(-65);
+    const __m256i zero = _mm256_setzero_si256();
+    uint64_t total = 0, i = 0;
+    while (i + 64 <= len)
+    {
+        __m256i a0 = zero, a1 = zero;
+        const uint64_t lim = std::min<uint64_t>(len, i + 255ull * 64);
+        for (; i + 64 <= lim; i += 64)
+        {
+            const __m256i v0 = _mm256_loadu_si256((const __m256i*)(p + i));
+            const __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + i + 32));
+            if (Mode == 0)
+            {
+                a0 = _mm256_sub_epi8(a0, _mm256_cmpeq_epi8(v0, nb));
+                a1 = _mm256_sub_epi8(a1, _mm256_cmpeq_epi8(v1, nb));
+            }
+            else
+            {
+                a0 = _mm256_sub_epi8(a0, _mm256_cmpgt_epi8(v0, th));
+                a1 = _mm256_sub_epi8(a1, _mm256_cmpgt_epi8(v1, th));
+            }
+        }
+        const __m256i sum = _mm256_add_epi64(_mm256_sad_epu8(a0, zero), _mm256_sad_epu8(a1, zero));
+        total += (uint64_t)_mm256_extract_epi64(sum, 0) + (uint64_t)_mm256_extract_epi64(sum, 1) + (uint64_t)_mm256_extract_epi64(sum, 2) +
+                 (uint64_t)_mm256_extract_epi64(sum, 3);
+    }
+    for (; i < len; ++i) total += Mode == 0 ? (p[i] == b) : ((p[i] & 0xC0) != 0x80);
+    return total;
+}
+
 uint64_t CountByte(const uint8_t* p, uint64_t len, uint8_t b)
 {
+    if (g_avx2) return CountAvx2<0>(p, len, b);
     uint64_t cnt = 0, i = 0;
     const __m128i nb = _mm_set1_epi8((char)b);
     for (; i + 16 <= len; i += 16)
@@ -216,6 +253,7 @@ uint64_t CountByte(const uint8_t* p, uint64_t len, uint8_t b)
 
 uint64_t CountCodePoints(const uint8_t* p, uint64_t len)
 {
+    if (g_avx2) return CountAvx2<1>(p, len, 0);
     // 継続バイト (0x80..0xBF) は signed で -128..-65。それ以外 (> -65) を数える
     uint64_t cnt = 0, i = 0;
     const __m128i th = _mm_set1_epi8(-65);
@@ -223,6 +261,74 @@ uint64_t CountCodePoints(const uint8_t* p, uint64_t len)
         cnt += std::popcount((unsigned)_mm_movemask_epi8(_mm_cmpgt_epi8(_mm_loadu_si128((const __m128i*)(p + i)), th)));
     for (; i < len; ++i) cnt += ((p[i] & 0xC0) != 0x80);
     return cnt;
+}
+
+// [p, p+len) を走査して行番号と「行頭からの文字数」を進める (1 パスで改行数と最後の改行以降のコードポイント数を数える)
+FR_TARGET_AVX2 static void AdvanceAvx2(const uint8_t* p, uint64_t len, uint64_t& line, uint64_t& col)
+{
+    const __m256i nlv = _mm256_set1_epi8('\n');
+    const __m256i th = _mm256_set1_epi8(-65);
+    uint64_t i = 0;
+    for (; i + 32 <= len; i += 32)
+    {
+        const __m256i v = _mm256_loadu_si256((const __m256i*)(p + i));
+        const uint32_t nl = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, nlv));
+        const uint32_t cp = (uint32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(v, th));
+        if (nl)
+        {
+            line += (uint64_t)std::popcount(nl);
+            const int last = 31 - std::countl_zero(nl);
+            col = (uint64_t)std::popcount(last == 31 ? 0u : (cp >> (last + 1)));
+        }
+        else
+            col += (uint64_t)std::popcount(cp);
+    }
+    for (; i < len; ++i)
+    {
+        if (p[i] == '\n')
+        {
+            ++line;
+            col = 0;
+        }
+        else if ((p[i] & 0xC0) != 0x80)
+            ++col;
+    }
+}
+
+void AdvanceLineCol(const uint8_t* p, uint64_t len, uint64_t& line, uint64_t& col)
+{
+    if (g_avx2)
+    {
+        AdvanceAvx2(p, len, line, col);
+        return;
+    }
+    const __m128i nlv = _mm_set1_epi8('\n');
+    const __m128i th = _mm_set1_epi8(-65);
+    uint64_t i = 0;
+    for (; i + 16 <= len; i += 16)
+    {
+        const __m128i v = _mm_loadu_si128((const __m128i*)(p + i));
+        const uint32_t nl = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(v, nlv));
+        const uint32_t cp = (uint32_t)_mm_movemask_epi8(_mm_cmpgt_epi8(v, th));
+        if (nl)
+        {
+            line += (uint64_t)std::popcount(nl);
+            const int last = 31 - std::countl_zero(nl);
+            col = (uint64_t)std::popcount(cp >> (last + 1));
+        }
+        else
+            col += (uint64_t)std::popcount(cp);
+    }
+    for (; i < len; ++i)
+    {
+        if (p[i] == '\n')
+        {
+            ++line;
+            col = 0;
+        }
+        else if ((p[i] & 0xC0) != 0x80)
+            ++col;
+    }
 }
 
 const uint8_t* FindLastByte(const uint8_t* p, uint64_t len, uint8_t b)

@@ -18,6 +18,8 @@ struct Context
     std::string left, match, right;
 };
 void BuildContext(const uint8_t* t, uint64_t n, uint64_t pos, uint32_t len, int budget, Context& out);
+// 前後文をテキスト出力用に out へ直接追加する (一致部分を【】で囲む。BuildContext と同じ範囲)
+void AppendContextText(std::string& out, const uint8_t* t, uint64_t n, uint64_t pos, uint32_t len, int budget);
 
 // s の表示桁 [hscroll, hscroll + cols) の部分だけを out に追加する。col は s の手前までの累計桁 (更新される)
 void AppendClipped(std::string& out, const std::string& s, uint64_t& col, uint64_t hscroll, uint64_t cols);

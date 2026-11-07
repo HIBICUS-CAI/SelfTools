@@ -579,17 +579,21 @@ std::string ItemLabel(uint64_t line, uint64_t col, uint64_t pos, uint32_t pat, b
 // テキスト出力用の 1 行 (検索文字を中央に、全体を width 桁に収める。一致は【】で囲む)
 void AppendItemText(std::string& out, const uint8_t* t, uint64_t n, const Match& m, uint64_t line, uint64_t col, bool multi, int width)
 {
-    const std::string label = ItemLabel(line, col, m.pos, m.pat, multi);
-    const int budget = std::max(8, width - view::TextWidth(label) - 4);
-    view::Context cx;
-    view::BuildContext(t, n, m.pos, m.len, budget, cx);
-    out += label;
-    out.append((size_t)cx.pad, ' ');
-    out += cx.left;
-    out += "【";
-    out += cx.match;
-    out += "】";
-    out += cx.right;
+    const size_t start = out.size();
+    out += "  L";
+    AppendU64(out, line);
+    out += ":C";
+    AppendU64(out, col);
+    out += "  @";
+    AppendU64(out, m.pos);
+    if (multi)
+    {
+        out += "  #";
+        AppendU64(out, (uint64_t)m.pat + 1);
+    }
+    out += "  ";
+    const int labelWidth = (int)(out.size() - start);  // ラベルは ASCII のみ
+    view::AppendContextText(out, t, n, m.pos, m.len, std::max(8, width - labelWidth - 4));
     out.push_back('\n');
 }
 
@@ -769,6 +773,8 @@ struct Job
     bool openFailed = false;
     std::string openErr;
     std::vector<Match> all;
+    std::vector<uint64_t> chunkNl;    // 検索モード: チャンクごとの改行数 (検索と同時に数えたもの)
+    std::vector<char> chunkCounted;   // chunkNl が有効か (一致が見つかって以降に走査したチャンクのみ)
     FileStat st;
 };
 
@@ -878,12 +884,48 @@ void Processor::FindMatches(Job& job)
     const uint64_t cs = cfg_.chunk;
     const size_t nChunks = (size_t)((n + cs - 1) / cs);
     std::vector<std::vector<Match>> per(nChunks);
+    const bool countLines = cfg_.searchOnly;
+    std::atomic<bool> anyMatch{false};  // 一致が 1 つも無いファイルでは改行を数えない
+    if (countLines)
+    {
+        job.chunkNl.assign(nChunks, 0);
+        job.chunkCounted.assign(nChunks, 0);
+    }
     ParallelFor(cfg_.threads, nChunks,
                 [&](size_t c)
                 {
                     const uint64_t b = c * cs, e = std::min(n, b + cs);
                     job.in.Prefetch(b, e - b + m_.MaxLen());
-                    m_.FindAll(t, n, b, e, per[c]);
+                    if (!countLines)
+                    {
+                        m_.FindAll(t, n, b, e, per[c]);
+                        return;
+                    }
+                    // 検索モード: 1 MiB ごとに検索と改行数の集計を行い、データがキャッシュにある間に済ませる
+                    // (区間を続けて走査するので結果はチャンク一括の検索と同じ)
+                    constexpr uint64_t kSub = 1ull << 20;
+                    std::vector<Match>& L = per[c];
+                    uint64_t from = b, nl = 0;
+                    bool full = true;  // チャンク全体を数えたか
+                    for (uint64_t sb = b; sb < e; sb += kSub)
+                    {
+                        const uint64_t se = std::min(e, sb + kSub);
+                        const size_t before = L.size();
+                        if (from < se) m_.FindAll(t, n, from, se, L);
+                        if (L.size() > before)
+                        {
+                            from = std::max(se, L.back().pos + L.back().len);
+                            anyMatch.store(true, std::memory_order_relaxed);
+                        }
+                        else
+                            from = std::max(from, se);
+                        if (anyMatch.load(std::memory_order_relaxed))
+                            nl += simd::CountByte(t + sb, se - sb, '\n');
+                        else
+                            full = false;
+                    }
+                    job.chunkNl[c] = nl;
+                    job.chunkCounted[c] = full;
                 });
 
     // チャンク境界をまたぐ重なりを解消 (逐次スキャンと完全に同じ結果にする)
@@ -952,11 +994,13 @@ void Processor::WriteSearchReport(const Job& job, plat::TextWriter* rep, ViewDat
             sums[c].mEnd = j;
         }
     }
-    ParallelFor(cfg_.threads, nChunks,
+    // 最後の一致を含むチャンクより後ろは行番号の計算に不要
+    const size_t needChunks = all.empty() ? 0 : (size_t)(all.back().pos / cs) + 1;
+    ParallelFor(cfg_.threads, needChunks,
                 [&](size_t c)
                 {
                     const uint64_t b = c * cs, e = std::min(n, b + cs);
-                    sums[c].nl = simd::CountByte(t + b, e - b, '\n');
+                    sums[c].nl = (job.chunkCounted.size() == nChunks && job.chunkCounted[c]) ? job.chunkNl[c] : simd::CountByte(t + b, e - b, '\n');
                     const uint8_t* last = sums[c].nl ? simd::FindLastByte(t + b, e - b, '\n') : nullptr;
                     const uint64_t from = last ? (uint64_t)(last - t) + 1 : b;
                     sums[c].tailChars = simd::CountCodePoints(t + from, e - from);
@@ -1025,16 +1069,7 @@ void Processor::WriteSearchReport(const Job& job, plat::TextWriter* rep, ViewDat
             for (size_t k = s.mBegin; k < s.mEnd; ++k)
             {
                 const Match& m = all[k];
-                const uint64_t gap = m.pos - pos;
-                const uint64_t nl = simd::CountByte(t + pos, gap, '\n');
-                if (nl)
-                {
-                    ln += nl;
-                    const uint8_t* last = simd::FindLastByte(t + pos, gap, '\n');
-                    cl = simd::CountCodePoints(last + 1, (uint64_t)(t + m.pos - (last + 1)));
-                }
-                else
-                    cl += simd::CountCodePoints(t + pos, gap);
+                simd::AdvanceLineCol(t + pos, m.pos - pos, ln, cl);
                 pos = m.pos;
                 if (view)
                     out.items.push_back(Item{m.pos, ln, cl + 1, m.len, m.pat});
