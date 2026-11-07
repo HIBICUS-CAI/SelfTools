@@ -24,6 +24,208 @@
 #include <unistd.h>
 #endif
 
+namespace view
+{
+int CharWidth(char32_t c)
+{
+    if (c == 0x200B || (c >= 0x0300 && c <= 0x036F) || (c >= 0x3099 && c <= 0x309A) || (c >= 0xFE00 && c <= 0xFE0F)) return 0;
+    if ((c >= 0x1100 && c <= 0x115F) || (c >= 0x2E80 && c <= 0x303E) || (c >= 0x3041 && c <= 0x33FF) || (c >= 0x3400 && c <= 0x4DBF) ||
+        (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xA000 && c <= 0xA4CF) || (c >= 0xAC00 && c <= 0xD7A3) || (c >= 0xF900 && c <= 0xFAFF) ||
+        (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFF60) || (c >= 0xFFE0 && c <= 0xFFE6) || (c >= 0x1F300 && c <= 0x1F64F) ||
+        (c >= 0x1F900 && c <= 0x1F9FF) || (c >= 0x20000 && c <= 0x3FFFD))
+        return 2;
+    return 1;
+}
+
+int TextWidth(const std::string& s)
+{
+    const uint8_t* p = (const uint8_t*)s.data();
+    const uint64_t n = s.size();
+    int w = 0;
+    for (uint64_t i = 0; i < n;)
+    {
+        const int l = utf8::ValidLen(p + i, n - i);
+        if (l == 0)
+        {
+            ++w;
+            ++i;
+            continue;
+        }
+        w += CharWidth(utf8::DecodeAt(p, n, i));
+        i += (uint64_t)l;
+    }
+    return w;
+}
+
+int TerminalWidth()
+{
+#ifdef _WIN32
+    const DWORD ids[] = {STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+    for (DWORD id : ids)
+    {
+        CONSOLE_SCREEN_BUFFER_INFO ci;
+        if (GetConsoleScreenBufferInfo(GetStdHandle(id), &ci)) return ci.srWindow.Right - ci.srWindow.Left + 1;
+    }
+#else
+    for (int fd : {1, 2, 0})
+    {
+        winsize ws{};
+        if (ioctl(fd, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) return ws.ws_col;
+    }
+#endif
+    return 0;
+}
+
+namespace
+{
+// t[i] から 1 文字を表示用に変換 (制御文字は \t \r \n \xHH、不正 UTF-8 は \xHH)。戻り値: 消費バイト数
+uint64_t Piece(const uint8_t* t, uint64_t n, uint64_t i, std::string& s, int& w)
+{
+    static const char kHex[] = "0123456789ABCDEF";
+    const uint8_t b = t[i];
+    s.clear();
+    if (b >= 0x20 && b < 0x7F)
+    {
+        s.push_back((char)b);
+        w = 1;
+        return 1;
+    }
+    if (b >= 0x80)
+    {
+        if (const int l = utf8::ValidLen(t + i, n - i))
+        {
+            s.assign((const char*)t + i, (size_t)l);
+            w = CharWidth(utf8::DecodeAt(t, n, i));
+            return (uint64_t)l;
+        }
+    }
+    if (b == '\t')
+        s = "\\t";
+    else if (b == '\r')
+        s = "\\r";
+    else if (b == '\n')
+        s = "\\n";
+    else
+    {
+        s = "\\x";
+        s.push_back(kHex[b >> 4]);
+        s.push_back(kHex[b & 15]);
+    }
+    w = (int)s.size();
+    return 1;
+}
+}  // namespace
+
+void BuildContext(const uint8_t* t, uint64_t n, uint64_t pos, uint32_t len, int budget, Context& out)
+{
+    out = Context();
+    if (budget < 1) budget = 1;
+    std::string pc;
+    int pw = 0;
+    // 一致部分
+    int mw = 0;
+    {
+        const uint64_t e = pos + len;
+        for (uint64_t i = pos; i < e;)
+        {
+            const uint64_t l = Piece(t, n, i, pc, pw);
+            if (mw + pw > budget)
+            {
+                // 収まらない: 末尾を ".." にして切り詰める
+                while (mw + 2 > budget && !out.match.empty())
+                {
+                    // 直前の 1 文字を落とす
+                    size_t k = out.match.size() - 1;
+                    while (k > 0 && ((uint8_t)out.match[k] & 0xC0) == 0x80) --k;
+                    out.match.resize(k);
+                    mw = TextWidth(out.match);
+                }
+                out.match += "..";
+                return;
+            }
+            out.match += pc;
+            mw += pw;
+            i += l;
+        }
+    }
+    const int side = (budget - mw) / 2;
+    const int rightBudget = budget - mw - side;
+
+    // 左側: 一致位置から行頭方向へ
+    {
+        std::string rev;  // 1 文字ずつ前に足していく
+        int lw = 0;
+        uint64_t i = pos;
+        while (i > 0)
+        {
+            uint64_t k = i - 1;
+            while (k > 0 && (t[k] & 0xC0) == 0x80 && i - k < 4) --k;
+            if (utf8::ValidLen(t + k, i - k) != (int)(i - k)) k = i - 1;  // 不正な列は 1 バイトずつ
+            if (t[k] == '\n') break;
+            Piece(t, i, k, pc, pw);  // [k, i) の範囲だけで解釈する
+            if (lw + pw > side) break;
+            rev.insert(0, pc);
+            lw += pw;
+            i = k;
+        }
+        out.left = std::move(rev);
+        out.pad = side - lw;
+    }
+    // 右側: 一致の直後から行末方向へ (CRLF の \r は行末として扱う)
+    {
+        int rw = 0;
+        for (uint64_t i = pos + len; i < n;)
+        {
+            if (t[i] == '\n' || (t[i] == '\r' && i + 1 < n && t[i + 1] == '\n')) break;
+            const uint64_t l = Piece(t, n, i, pc, pw);
+            if (rw + pw > rightBudget) break;
+            out.right += pc;
+            rw += pw;
+            i += l;
+        }
+    }
+}
+
+void AppendClipped(std::string& out, const std::string& s, uint64_t& col, uint64_t hscroll, uint64_t cols)
+{
+    const uint64_t end = hscroll + cols;
+    const uint8_t* p = (const uint8_t*)s.data();
+    const uint64_t n = s.size();
+    for (uint64_t i = 0; i < n && col < end;)
+    {
+        int l = utf8::ValidLen(p + i, n - i);
+        int w;
+        bool printable;
+        if (l == 0)
+        {
+            l = 1;
+            w = 1;
+            printable = false;
+        }
+        else
+        {
+            const char32_t cp = utf8::DecodeAt(p, n, i);
+            w = CharWidth(cp);
+            printable = !(cp < 0x20 || cp == 0x7F);
+        }
+        if (col + (uint64_t)w <= hscroll)
+        {
+            // 左に隠れる部分
+        }
+        else if (col < hscroll)
+            out.push_back(' ');  // 横スクロール境界をまたぐ全角文字
+        else if (col + (uint64_t)w > end)
+            break;
+        else if (printable)
+            out.append((const char*)p + i, (size_t)l);
+        else
+            out.push_back('?');  // 制御シーケンスの混入を防ぐ
+        col += (uint64_t)w;
+        i += (uint64_t)l;
+    }
+}
+}  // namespace view
+
 namespace pager
 {
 namespace
@@ -44,72 +246,6 @@ enum class Key
     Quit,
     Redraw
 };
-
-// 表示幅 (East Asian Wide / Fullwidth を 2、結合文字を 0)
-int CharWidth(char32_t c)
-{
-    if (c == 0x200B || (c >= 0x0300 && c <= 0x036F) || (c >= 0x3099 && c <= 0x309A) || (c >= 0xFE00 && c <= 0xFE0F)) return 0;
-    if ((c >= 0x1100 && c <= 0x115F) || (c >= 0x2E80 && c <= 0x303E) || (c >= 0x3041 && c <= 0x33FF) || (c >= 0x3400 && c <= 0x4DBF) ||
-        (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xA000 && c <= 0xA4CF) || (c >= 0xAC00 && c <= 0xD7A3) || (c >= 0xF900 && c <= 0xFAFF) ||
-        (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFF60) || (c >= 0xFFE0 && c <= 0xFFE6) || (c >= 0x1F300 && c <= 0x1F64F) ||
-        (c >= 0x1F900 && c <= 0x1F9FF) || (c >= 0x20000 && c <= 0x3FFFD))
-        return 2;
-    return 1;
-}
-
-// 1 行を [hscroll, hscroll + cols) の表示桁だけ切り出して out に追加する
-void RenderLine(std::string& out, const uint8_t* p, uint64_t len, uint64_t hscroll, int cols)
-{
-    uint64_t col = 0;
-    int used = 0;
-    uint64_t i = 0;
-    while (i < len && used < cols)
-    {
-        const uint8_t b = p[i];
-        char32_t cp = U'?';
-        uint64_t l = 1;
-        bool printable;  // false なら '?' で表示 (制御文字・不正な UTF-8。端末への制御シーケンス混入も防ぐ)
-        if (b < 0x80)
-        {
-            printable = b >= 0x20 && b != 0x7F;
-            if (printable) cp = b;
-        }
-        else
-        {
-            const int vl = utf8::ValidLen(p + i, len - i);
-            printable = vl > 0;
-            if (printable)
-            {
-                cp = utf8::DecodeAt(p, len, i);
-                l = (uint64_t)vl;
-            }
-        }
-        const int w = CharWidth(cp);
-        if (col + (uint64_t)w <= hscroll)
-        {
-            col += (uint64_t)w;
-            i += l;
-            continue;
-        }
-        if (col < hscroll)
-        {
-            // 横スクロール境界をまたぐ全角文字は空白で埋める
-            out.push_back(' ');
-            ++used;
-            col += (uint64_t)w;
-            i += l;
-            continue;
-        }
-        if (used + w > cols) break;
-        if (printable)
-            out.append((const char*)p + i, (size_t)l);
-        else
-            out.push_back('?');
-        used += w;
-        col += (uint64_t)w;
-        i += l;
-    }
-}
 
 // ---- 端末入出力 ----
 #ifdef _WIN32
@@ -331,34 +467,15 @@ struct Term
 bool InteractiveImpl() { return isatty(0) && isatty(1); }
 #endif
 
-void AppendU64(std::string& s, uint64_t v) { s += std::to_string(v); }
 }  // namespace
 
 bool IsInteractive() { return InteractiveImpl(); }
 
-void Run(const uint8_t* text, uint64_t size, const std::string& title)
+void Run(Source& src, const std::string& title)
 {
-    // 行頭位置の索引 (BOM は飛ばす)
-    uint64_t start = (size >= 3 && text[0] == 0xEF && text[1] == 0xBB && text[2] == 0xBF) ? 3 : 0;
-    std::vector<uint64_t> lines;
-    lines.reserve((size_t)(size / 32 + 16));
-    for (uint64_t p = start; p < size;)
-    {
-        lines.push_back(p);
-        const void* nl = std::memchr(text + p, '\n', (size_t)(size - p));
-        if (!nl) break;
-        p = (uint64_t)((const uint8_t*)nl - text) + 1;
-    }
-    const uint64_t N = lines.size();
-    auto lineLen = [&](uint64_t i) -> uint64_t
-    {
-        uint64_t b = lines[i], e = (i + 1 < N) ? lines[i + 1] : size;
-        while (e > b && (text[e - 1] == '\n' || text[e - 1] == '\r')) --e;
-        return e - b;
-    };
-
     Term term;
     if (!term.Begin()) return;
+    const uint64_t N = src.Count();
     uint64_t top = 0, hscroll = 0;
     for (;;)
     {
@@ -373,36 +490,24 @@ void Run(const uint8_t* text, uint64_t size, const std::string& title)
         {
             const uint64_t i = top + r;
             if (i < N)
-                RenderLine(frame, text + lines[i], lineLen(i), hscroll, cols);
+                src.Render(i, cols, hscroll, frame);
             else
                 frame += "~";
-            frame += "\x1b[K\r\n";
+            frame += "\x1b[0m\x1b[K\r\n";
         }
         // ステータス行
-        std::string st = " ";
-        st += title;
-        st += "  ";
-        AppendU64(st, N ? top + 1 : 0);
-        st += "-";
-        AppendU64(st, std::min(N, top + body));
-        st += " / ";
-        AppendU64(st, N);
-        st += " 行";
-        if (hscroll)
-        {
-            st += "  (横 +";
-            AppendU64(st, hscroll);
-            st += ")";
-        }
-        st += top >= maxTop ? "  (END)" : "";
+        std::string st = " " + title + "  " + std::to_string(N ? top + 1 : 0) + "-" + std::to_string(std::min(N, top + body)) + " / " +
+                         std::to_string(N) + " 行";
+        if (hscroll) st += "  (横 +" + std::to_string(hscroll) + ")";
+        if (top >= maxTop) st += "  (END)";
         st += "   q:閉じる ↑↓:行 PgUp/PgDn:ページ Home/End ←→:横";
         frame += "\x1b[7m";
-        RenderLine(frame, (const uint8_t*)st.data(), st.size(), 0, cols);
+        uint64_t c = 0;
+        view::AppendClipped(frame, st, c, 0, (uint64_t)cols);
         frame += "\x1b[K\x1b[0m";
         term.Write(frame);
 
-        const Key k = term.Read();
-        switch (k)
+        switch (term.Read())
         {
         case Key::Quit: term.End(); return;
         case Key::Up: top = top ? top - 1 : 0; break;

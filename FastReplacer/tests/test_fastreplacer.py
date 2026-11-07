@@ -146,6 +146,71 @@ def esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
 
 
+def disp_escape(bs: bytes) -> str:
+    """ツールの表示用エスケープと同じ規則 (制御文字 \\t \\r \\n \\xHH、不正 UTF-8 は \\xHH)"""
+    out, i = [], 0
+    while i < len(bs):
+        b = bs[i]
+        if 0x20 <= b < 0x7F:
+            out.append(chr(b)); i += 1; continue
+        if b >= 0x80:
+            for L in (2, 3, 4):
+                try:
+                    ch = bs[i:i + L].decode("utf-8")
+                    if len(ch) == 1:
+                        out.append(ch); i += L; break
+                except UnicodeDecodeError:
+                    pass
+            else:
+                out.append("\\x%02X" % b); i += 1
+            continue
+        out.append({9: "\\t", 13: "\\r", 10: "\\n"}.get(b, "\\x%02X" % b)); i += 1
+    return "".join(out)
+
+
+def char_width(c):
+    o = ord(c)
+    if o == 0x200B or 0x300 <= o <= 0x36F or 0x3099 <= o <= 0x309A or 0xFE00 <= o <= 0xFE0F:
+        return 0
+    for a, b in ((0x1100, 0x115F), (0x2E80, 0x303E), (0x3041, 0x33FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xA000, 0xA4CF),
+                 (0xAC00, 0xD7A3), (0xF900, 0xFAFF), (0xFE30, 0xFE4F), (0xFF00, 0xFF60), (0xFFE0, 0xFFE6), (0x1F300, 0x1F64F),
+                 (0x1F900, 0x1F9FF), (0x20000, 0x3FFFD)):
+        if a <= o <= b:
+            return 2
+    return 1
+
+
+def check_context(data: bytes, b: int, l: int, raw: str, W: int):
+    """レポート 1 行の前後文が正しいか。問題があれば理由を返す"""
+    lab = re.match(r"^  L\d+:C\d+  @\d+(?:  #\d+)?  ", raw)
+    if not lab:
+        return "ラベルの形式"
+    rest = raw[lab.end():]
+    if "【" not in rest or "】" not in rest:
+        return "一致の囲みがない"
+    i0 = rest.index("【")
+    i1 = rest.rindex("】")
+    left, match, right = rest[:i0], rest[i0 + 1:i1], rest[i1 + 1:]
+    wm = disp_escape(data[b:b + l])
+    if match != wm and not (match.endswith("..") and wm.startswith(match[:-2])):
+        return "一致部分 %r != %r" % (match, wm)
+    ls = data.rfind(b"\n", 0, b) + 1
+    before = disp_escape(data[ls:b])
+    if not before.endswith(left.lstrip(" ")):
+        return "左の文脈が行の内容と一致しない"
+    le = data.find(b"\n", b + l)
+    le = len(data) if le < 0 else le
+    if le > b + l and data[le - 1:le] == b"\r" and le < len(data):
+        le -= 1
+    after = disp_escape(data[b + l:le])
+    if not after.startswith(right):
+        return "右の文脈が行の内容と一致しない"
+    w = sum(char_width(c) for c in raw)
+    if w > max(W, len(lab.group(0)) + 12) and not match.endswith(".."):
+        return "幅 %d > %d" % (w, W)
+    return None
+
+
 REPORT_RE = re.compile(r"^  L(\d+):C(\d+)  @(\d+)(?:  #(\d+))?(  .*)?$")
 
 
@@ -199,7 +264,8 @@ def main():
             mc = rng.random() < 0.4
             ww = rng.random() < 0.4
             rec = rng.random() < 0.5
-            cx = False  # 文脈出力 (-x) は廃止
+            cx = True  # 前後文は常に出力
+            W = rng.choice([300, 300, 60, 40])
             chunk = rng.choice([1, 2, 3, 7, 16, 33, 64, 1000, 1 << 20])
             threads = rng.choice([1, 2, 3, 8])
             io = rng.choice([[], [], ["--sequential"]])
@@ -228,7 +294,7 @@ def main():
                         args += ["-" + value_opt, value]
                 for p in rest_pats:
                     args += (["--find=" + esc(p)] if rng.random() < 0.3 else ["-f", esc(p)])
-                return args + ["-t", str(threads), "--chunk-size", str(chunk)] + io
+                return args + ["-t", str(threads), "--chunk-size", str(chunk), "-W", str(W)] + io
 
             targets = [n for n in files if rec or os.path.dirname(n) == d]
             expect = {n: ref_find(files[n], pats, mc, ww) for n in targets}
@@ -247,6 +313,7 @@ def main():
                 env_fail += 1
                 continue
             got, cur = {}, None
+            ctxs = {}
             if use_stdout:
                 if [x for x in os.listdir(".") if x.startswith("FastReplacer_report_")]:
                     print("FAIL(report file created in stdout mode) %s" % ctx)
@@ -266,7 +333,15 @@ def main():
                     if has_ctx != cx:
                         got[cur].append("context-mismatch")
                     got[cur].append((int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)) if m.group(4) else None))
+                    ctxs.setdefault(cur, []).append(raw)
             for n in targets:
+                # 前後文: 一致部分・左右の文脈・行の幅を検証
+                for (b, l, k), raw in zip(expect[n], ctxs.get(n, [])):
+                    bad = check_context(files[n], b, l, raw, W)
+                    if bad:
+                        print("FAIL(context) %s file=%s off=%d: %s\n  %r" % (ctx, n, b, bad, raw))
+                        env_fail += 1
+                        break
                 exp = [(line_col(files[n], b) + (b, (k + 1) if multi else None)) for b, _, k in expect[n]]
                 if got.get(n, []) != exp:
                     print("FAIL(search) %s file=%s\n exp=%s\n got=%s" % (ctx, n, exp[:10], got.get(n, [])[:10]))

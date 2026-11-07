@@ -51,6 +51,8 @@ struct Config
     bool escapes = false;
     bool sequential = false;  // ファイル間の重ね合わせを行わない
     bool viewTempFile = false;  // ページャ表示用の結果を一時ファイルに置く (既定はメモリ)
+    int width = 0;              // 1 項目の表示幅 (0 = 端末の幅)
+    int textWidth = 160;        // テキスト出力 (標準出力 / -o) で使う実際の幅
     MatchOptions opt;
     std::string reportPath;
     unsigned threads = 0;
@@ -77,6 +79,8 @@ void PrintUsage()
         "  -e, --escape           検索/置換文字列のエスケープを解釈する\n"
         "                         (\\\\ \\n \\r \\t \\0 \\xHH \\uXXXX \\UXXXXXXXX)\n"
         "  -o, --report <path>    結果をファイルに書き出す (指定時のみ。検索モードでは画面表示の代わり)\n"
+        "  -W, --width <cols>     結果 1 項目の表示幅 (桁)。検索文字を中央に、前後文を 1 行に収める\n"
+        "                         (既定: 端末の幅。取得できなければ 160)\n"
         "  -t, --threads <n>      スレッド数 (既定: 論理コア数)\n"
         "      --tempfile         画面表示用の結果をメモリではなく一時ファイルに置く (結果が膨大な場合向け)\n"
         "      --sequential       ファイルを 1 つずつ処理する (既定は書き出しと次ファイルの検索を重ねる。\n"
@@ -164,6 +168,7 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         kEsc,
         kReport,
         kThreads,
+        kWidth,
         kSeq,
         kTemp,
         kChunk,
@@ -181,7 +186,7 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         {'f', "find", kFind, true},          {'r', "replace", kReplace, true},  {'s', "search-only", kSearch, false},
         {'c', "match-case", kCase, false},   {'w', "whole-word", kWord, false}, {'R', "recursive", kRec, false},
         {'e', "escape", kEsc, false},        {'o', "report", kReport, true},
-        {'t', "threads", kThreads, true},    {0, "sequential", kSeq, false}, {0, "tempfile", kTemp, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
+        {'t', "threads", kThreads, true},    {'W', "width", kWidth, true},    {0, "sequential", kSeq, false}, {0, "tempfile", kTemp, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
         {'h', "help", kHelp, false},
     };
 
@@ -210,6 +215,7 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         case kEsc: cfg.escapes = true; break;
         case kReport: cfg.reportPath = v; break;
         case kThreads: cfg.threads = (unsigned)std::strtoul(v.c_str(), nullptr, 10); break;
+        case kWidth: cfg.width = (int)std::strtol(v.c_str(), nullptr, 10); break;
         case kSeq: cfg.sequential = true; break;
         case kTemp: cfg.viewTempFile = true; break;
         case kChunk: cfg.chunk = std::max<uint64_t>(1, std::strtoull(v.c_str(), nullptr, 10)); break;
@@ -543,6 +549,207 @@ inline void AppendU64(std::string& out, uint64_t v)
 // ============================================================================
 // ファイル処理 (検索 → 出力 の 2 段パイプライン。段ごとにファイル順を保つ)
 // ============================================================================
+// ページャ表示用の 1 項目 (前後文は表示時にファイルから作る)
+struct Item
+{
+    uint64_t pos;
+    uint64_t line;
+    uint64_t col;  // 1 始まり
+    uint32_t len;
+    uint32_t pat;
+};
+
+std::string ItemLabel(uint64_t line, uint64_t col, uint64_t pos, uint32_t pat, bool multi)
+{
+    std::string s = "  L";
+    AppendU64(s, line);
+    s += ":C";
+    AppendU64(s, col);
+    s += "  @";
+    AppendU64(s, pos);
+    if (multi)
+    {
+        s += "  #";
+        AppendU64(s, (uint64_t)pat + 1);
+    }
+    s += "  ";
+    return s;
+}
+
+// テキスト出力用の 1 行 (検索文字を中央に、全体を width 桁に収める。一致は【】で囲む)
+void AppendItemText(std::string& out, const uint8_t* t, uint64_t n, const Match& m, uint64_t line, uint64_t col, bool multi, int width)
+{
+    const std::string label = ItemLabel(line, col, m.pos, m.pat, multi);
+    const int budget = std::max(8, width - view::TextWidth(label) - 4);
+    view::Context cx;
+    view::BuildContext(t, n, m.pos, m.len, budget, cx);
+    out += label;
+    out.append((size_t)cx.pad, ' ');
+    out += cx.left;
+    out += "【";
+    out += cx.match;
+    out += "】";
+    out += cx.right;
+    out.push_back('\n');
+}
+
+// ページャに渡す表示データ (見出し等のテキスト行と、一致項目の並び)
+class ViewData : public pager::Source
+{
+public:
+    ViewData(int fixedWidth, bool multi) : fixedWidth_(fixedWidth), multi_(multi) {}
+    ~ViewData() override { Cleanup(); }
+
+    bool Begin(bool tempFile, std::string& err)
+    {
+        if (!tempFile) return true;
+        tmpPath_ = plat::TempFilePath("FastReplacer_view_");
+        if (!tmp_.Open(tmpPath_, err)) return false;
+        useTmp_ = true;
+        return true;
+    }
+    void AddText(const std::string& text)  // 改行で分割して追加
+    {
+        size_t b = 0;
+        while (b <= text.size())
+        {
+            size_t e = text.find('\n', b);
+            if (e == std::string::npos) e = text.size();
+            if (e == text.size() && b == e && b != 0) break;  // 末尾の改行
+            if (segs_.empty() || segs_.back().items || segs_.back().first + segs_.back().count != texts_.size())
+                PushSeg(false, 0, texts_.size());
+            texts_.push_back(text.substr(b, e - b));
+            ++segs_.back().count;
+            ++rows_;
+            b = e + 1;
+        }
+    }
+    void SetFile(uint32_t file, const NativePath& path)
+    {
+        if (paths_.size() <= file) paths_.resize(file + 1);
+        paths_[file] = path;
+    }
+    void AddItems(uint32_t file, const std::vector<Item>& v)
+    {
+        if (v.empty()) return;
+        if (segs_.empty() || !segs_.back().items || segs_.back().file != file) PushSeg(true, file, itemCount_);
+        if (useTmp_)
+            tmp_.Write(std::string((const char*)v.data(), v.size() * sizeof(Item)));
+        else
+            mem_.insert(mem_.end(), v.begin(), v.end());
+        itemCount_ += v.size();
+        segs_.back().count += v.size();
+        rows_ += v.size();
+    }
+    bool Finish(std::string& err)
+    {
+        if (!useTmp_)
+        {
+            items_ = mem_.data();
+            return true;
+        }
+        if (!tmp_.Close())
+        {
+            err = "一時ファイルへの書き込みに失敗しました";
+            return false;
+        }
+        if (itemCount_ && !tmpIn_.Open(tmpPath_, err)) return false;
+        items_ = (const Item*)tmpIn_.Data();
+        return true;
+    }
+    void Cleanup()
+    {
+        cache_.clear();
+        if (useTmp_)
+        {
+            tmp_.Close();
+            tmpIn_.Close();
+            plat::DeleteFileQuiet(tmpPath_);
+            useTmp_ = false;
+        }
+    }
+
+    uint64_t Count() override { return rows_; }
+
+    void Render(uint64_t row, int cols, uint64_t hscroll, std::string& out) override
+    {
+        const size_t si = (size_t)(std::upper_bound(segStart_.begin(), segStart_.end(), row) - segStart_.begin()) - 1;
+        const Seg& sg = segs_[si];
+        const uint64_t idx = sg.first + (row - segStart_[si]);
+        uint64_t col = 0;
+        if (!sg.items)
+        {
+            view::AppendClipped(out, texts_[(size_t)idx], col, hscroll, (uint64_t)cols);
+            return;
+        }
+        const Item& it = items_[idx];
+        const std::string label = ItemLabel(it.line, it.col, it.pos, it.pat, multi_);
+        const plat::InputFile* f = File(sg.file);
+        if (!f)
+        {
+            view::AppendClipped(out, label + "(ファイルを開けません)", col, hscroll, (uint64_t)cols);
+            return;
+        }
+        const int width = (fixedWidth_ > 0 ? fixedWidth_ : cols) + (int)hscroll;
+        const int budget = std::max(8, width - view::TextWidth(label));
+        view::Context cx;
+        view::BuildContext(f->Data(), f->Size(), it.pos, it.len, budget, cx);
+        view::AppendClipped(out, label, col, hscroll, (uint64_t)cols);
+        view::AppendClipped(out, std::string((size_t)cx.pad, ' '), col, hscroll, (uint64_t)cols);
+        view::AppendClipped(out, cx.left, col, hscroll, (uint64_t)cols);
+        out += "\x1b[30;43m";  // 一致部分を強調
+        view::AppendClipped(out, cx.match, col, hscroll, (uint64_t)cols);
+        out += "\x1b[0m";
+        view::AppendClipped(out, cx.right, col, hscroll, (uint64_t)cols);
+    }
+
+private:
+    struct Seg
+    {
+        bool items;
+        uint32_t file;
+        uint64_t first;
+        uint64_t count;
+    };
+    void PushSeg(bool items, uint32_t file, uint64_t first)
+    {
+        segStart_.push_back(rows_);
+        segs_.push_back(Seg{items, file, first, 0});
+    }
+    // 表示中のファイルを開いておく (最近使った 8 個)
+    const plat::InputFile* File(uint32_t file)
+    {
+        for (size_t i = 0; i < cache_.size(); ++i)
+            if (cache_[i].first == file)
+            {
+                if (i) std::rotate(cache_.begin(), cache_.begin() + (ptrdiff_t)i, cache_.begin() + (ptrdiff_t)i + 1);
+                return cache_[0].second.get();
+            }
+        auto f = std::make_unique<plat::InputFile>();
+        std::string err;
+        if (file >= paths_.size() || !f->Open(paths_[file], err)) return nullptr;
+        cache_.insert(cache_.begin(), {file, std::move(f)});
+        if (cache_.size() > 8) cache_.pop_back();
+        return cache_[0].second.get();
+    }
+
+    const int fixedWidth_;
+    const bool multi_;
+    std::vector<std::string> texts_;
+    std::vector<Seg> segs_;
+    std::vector<uint64_t> segStart_;
+    uint64_t rows_ = 0;
+    std::vector<Item> mem_;
+    uint64_t itemCount_ = 0;
+    const Item* items_ = nullptr;
+    bool useTmp_ = false;
+    NativePath tmpPath_;
+    plat::TextWriter tmp_;
+    plat::InputFile tmpIn_;
+    std::vector<NativePath> paths_;
+    std::vector<std::pair<uint32_t, std::unique_ptr<plat::InputFile>>> cache_;
+};
+
 struct FileStat
 {
     uint64_t size = 0;
@@ -555,6 +762,7 @@ struct FileStat
 
 struct Job
 {
+    size_t index = 0;
     NativePath path;
     plat::InputFile in;
     std::chrono::steady_clock::time_point t0;
@@ -567,7 +775,10 @@ struct Job
 class Processor
 {
 public:
-    Processor(const Config& cfg, const MultiMatcher& m, plat::TextWriter* report) : cfg_(cfg), m_(m), report_(report) {}
+    Processor(const Config& cfg, const MultiMatcher& m, plat::TextWriter* report, ViewData* view)
+        : cfg_(cfg), m_(m), report_(report), view_(view)
+    {
+    }
 
     // 全ファイルを処理し、ファイル順に onFileDone(i, stat) を呼ぶ (出力段のスレッドから)
     void Run(const std::vector<NativePath>& files, const std::function<void(size_t, const FileStat&)>& onFileDone);
@@ -580,13 +791,14 @@ private:
     void OutputLane(const std::function<void(size_t, const FileStat&)>& onFileDone);
 
     void FindMatches(Job& job);
-    void WriteSearchReport(const Job& job, plat::TextWriter& rep);
+    void WriteSearchReport(const Job& job, plat::TextWriter* rep, ViewData* view);
     bool WriteReplaced(const Job& job, const NativePath& tmp, uint64_t newSize, std::string& err);
     void Output(Job& job);
 
     const Config& cfg_;
     const MultiMatcher& m_;
     plat::TextWriter* report_;
+    ViewData* view_;
 
     std::vector<std::unique_ptr<Job>> jobs_;
     // 段の進行管理
@@ -603,6 +815,7 @@ void Processor::Run(const std::vector<NativePath>& files, const std::function<vo
     {
         jobs_.push_back(std::make_unique<Job>());
         jobs_.back()->path = f;
+        jobs_.back()->index = jobs_.size() - 1;
     }
     std::thread output([&] { OutputLane(onFileDone); });
     SearchLane();
@@ -713,7 +926,7 @@ void Processor::FindMatches(Job& job)
     }
 }
 
-void Processor::WriteSearchReport(const Job& job, plat::TextWriter& rep)
+void Processor::WriteSearchReport(const Job& job, plat::TextWriter* rep, ViewData* view)
 {
     const uint8_t* t = job.in.Data();
     const uint64_t n = job.in.Size();
@@ -778,16 +991,36 @@ void Processor::WriteSearchReport(const Job& job, plat::TextWriter& rep)
         }
     }
     head += ", " + FormatBytes(n) + ")\n";
-    rep.Write(head);
+    if (view)
+    {
+        view->SetFile((uint32_t)job.index, job.path);
+        view->AddText(head);
+    }
+    else
+        rep->Write(head);
 
-    // 4) 並列に整形しつつ順に書き出す
-    OrderedPipeline<std::string>(
+    // 4) 並列に整形 (テキスト) または項目化 (ページャ) しつつ順に出力する
+    struct Out
+    {
+        std::string text;
+        std::vector<Item> items;
+        void swap(Out& o) noexcept
+        {
+            text.swap(o.text);
+            items.swap(o.items);
+        }
+    };
+    const int width = cfg_.textWidth;
+    OrderedPipeline<Out>(
         cfg_.threads, nChunks,
-        [&](size_t c, std::string& out)
+        [&](size_t c, Out& out)
         {
             const Sum& s = sums[c];
             if (s.mBegin == s.mEnd) return;
-            out.reserve((s.mEnd - s.mBegin) * 32);
+            if (view)
+                out.items.reserve(s.mEnd - s.mBegin);
+            else
+                out.text.reserve((s.mEnd - s.mBegin) * (size_t)(width + 16));
             uint64_t pos = c * cs, ln = baseLine[c], cl = carryCol[c];
             for (size_t k = s.mBegin; k < s.mEnd; ++k)
             {
@@ -803,26 +1036,24 @@ void Processor::WriteSearchReport(const Job& job, plat::TextWriter& rep)
                 else
                     cl += simd::CountCodePoints(t + pos, gap);
                 pos = m.pos;
-                out += "  L";
-                AppendU64(out, ln);
-                out += ":C";
-                AppendU64(out, cl + 1);
-                out += "  @";
-                AppendU64(out, m.pos);
-                if (multi)
-                {
-                    out += "  #";
-                    AppendU64(out, (uint64_t)m.pat + 1);
-                }
-                out.push_back('\n');
+                if (view)
+                    out.items.push_back(Item{m.pos, ln, cl + 1, m.len, m.pat});
+                else
+                    AppendItemText(out.text, t, n, m, ln, cl + 1, multi, width);
             }
         },
-        [&](size_t, std::string& out)
+        [&](size_t, Out& out)
         {
-            rep.Write(out);
+            if (view)
+                view->AddItems((uint32_t)job.index, out.items);
+            else
+                rep->Write(out.text);
             return true;
         });
-    rep.Write("\n");
+    if (view)
+        view->AddText("");
+    else
+        rep->Write("\n");
 }
 
 bool Processor::WriteReplaced(const Job& job, const NativePath& tmp, uint64_t newSize, std::string& err)
@@ -926,7 +1157,7 @@ void Processor::Output(Job& job)
     st.matches = job.all.size();
     if (cfg_.searchOnly)
     {
-        if (report_ && !job.all.empty()) WriteSearchReport(job, *report_);
+        if ((report_ || view_) && !job.all.empty()) WriteSearchReport(job, report_, view_);
         return;
     }
     if (job.all.empty()) return;
@@ -1015,14 +1246,20 @@ int Run(const std::vector<std::string>& args)
     const bool useFile = !cfg.reportPath.empty();
     const bool toPager = cfg.searchOnly && !useFile && pager::IsInteractive();
     const bool toStdout = cfg.searchOnly && !useFile && !toPager;
-    const bool useReport = useFile || toPager || toStdout;
-    const bool pagerFile = toPager && cfg.viewTempFile;
+    std::unique_ptr<ViewData> view;
     NativePath reportPath;
-    if (toPager && !pagerFile)
-        report.OpenMemory();
-    else if (useFile || pagerFile)
+    if (toPager)
     {
-        reportPath = useFile ? plat::FromUtf8(cfg.reportPath) : plat::TempFilePath("FastReplacer_view_");
+        view = std::make_unique<ViewData>(cfg.width, cfg.finds.size() > 1);
+        if (!view->Begin(cfg.viewTempFile, err))
+        {
+            std::fprintf(stderr, "エラー: %s\n", err.c_str());
+            return 2;
+        }
+    }
+    else if (useFile)
+    {
+        reportPath = plat::FromUtf8(cfg.reportPath);
         if (!report.Open(reportPath, err))
         {
             std::fprintf(stderr, "エラー: %s\n", err.c_str());
@@ -1034,10 +1271,12 @@ int Run(const std::vector<std::string>& args)
         std::setvbuf(stdout, nullptr, _IOFBF, 8 << 20);  // 大量出力向けに全バッファリング (ファイルごとにフラッシュ)
         report.OpenStdout();
     }
+    // テキスト出力の幅 (指定がなければ端末の幅、取得できなければ 160)
+    cfg.textWidth = cfg.width > 0 ? cfg.width : (view::TerminalWidth() > 0 ? view::TerminalWidth() : 160);
     // レポート自身と一時ファイルは対象外
     files.erase(std::remove_if(files.begin(), files.end(),
                                [&](const NativePath& f)
-                               { return ((useFile || pagerFile) && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
+                               { return (useFile && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
                 files.end());
 
     const char* mode = cfg.searchOnly ? "検索のみ" : "置換";
@@ -1057,9 +1296,10 @@ int Run(const std::vector<std::string>& args)
     }
     fmt += "書式: L<行>:C<列(文字)>  @<バイトオフセット>";
     if (cfg.finds.size() > 1) fmt += "  #<検索文字列番号>";
+    fmt += toPager ? "  <前文><一致><後文>" : "  <前文>【一致】<後文>";
     fmt += "\n\n";
     if (toStdout) std::fputs(fmt.c_str(), stdout);
-    if (toPager) report.Write(fmt);
+    if (toPager) view->AddText(fmt);
     std::fflush(stdout);
 
     if (useFile)
@@ -1089,14 +1329,14 @@ int Run(const std::vector<std::string>& args)
         {
             h += "書式      : L<行>:C<列(文字)>  @<バイトオフセット>";
             if (cfg.finds.size() > 1) h += "  #<検索文字列番号>";
-            h += "\n\n";
+            h += "  <前文>【一致】<後文>\n\n";
         }
         else
             h += "\n<ファイル>\t<置換数>\t<結果>\n";
         report.Write(h);
     }
 
-    Processor proc(cfg, matcher, useReport ? &report : nullptr);
+    Processor proc(cfg, matcher, (useFile || toStdout) ? &report : nullptr, view.get());
     const auto t0 = std::chrono::steady_clock::now();
     uint64_t totalBytes = 0, totalMatches = 0, hitFiles = 0, errFiles = 0;
     std::vector<std::string> errors;
@@ -1133,31 +1373,18 @@ int Run(const std::vector<std::string>& args)
     }
     else if (toPager)
     {
-        report.Write(std::string("---\n") + sum + tail);
-        std::string title = "FastReplacer 検索結果 ";
-        AppendU64(title, totalMatches);
-        title += " 件";
-        if (!pagerFile)
+        view->AddText(std::string("---\n") + sum + tail);
+        std::string e2;
+        if (!view->Finish(e2))
+            std::fprintf(stderr, "エラー: %s\n", e2.c_str());
+        else if (totalMatches > 0)
         {
-            if (totalMatches > 0) pager::Run((const uint8_t*)report.Memory().data(), report.Memory().size(), title);
-            report.Close();
+            std::string title = "FastReplacer 検索結果 ";
+            AppendU64(title, totalMatches);
+            title += " 件";
+            pager::Run(*view, title);
         }
-        else
-        {
-            const bool ok = report.Close();
-            if (ok && totalMatches > 0)
-            {
-                plat::InputFile view;
-                std::string e2;
-                if (view.Open(reportPath, e2))
-                    pager::Run(view.Data(), view.Size(), title);
-                else
-                    std::fprintf(stderr, "エラー: 結果を表示できません: %s\n", e2.c_str());
-            }
-            else if (!ok)
-                std::fprintf(stderr, "エラー: 結果の一時ファイルに書き込めませんでした\n");
-            plat::DeleteFileQuiet(reportPath);
-        }
+        view->Cleanup();
         std::fputs(sum, stdout);
     }
     else
