@@ -147,18 +147,16 @@ bool InputFile::Open(const NativePath& path, std::string& err)
 {
     Close();
     path_ = path;
-    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED, nullptr);
-    unbuffered_ = h != INVALID_HANDLE_VALUE;
-    if (!unbuffered_)
-        h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-                        nullptr);
+    // 通常ハンドルで開く。FILE_FLAG_NO_BUFFERING で開くと、それだけで OS がこのファイルのキャッシュを
+    // 書き出して破棄するため、非バッファ読み込み (--direct) 時のみ PrepareRam で開き直す
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE)
     {
         err = "オープン失敗: " + LastErrorText();
         return false;
     }
     file_ = h;
+    unbuffered_ = false;
     LARGE_INTEGER sz;
     if (!GetFileSizeEx(h, &sz))
     {
@@ -177,14 +175,30 @@ bool InputFile::PrepareRam(std::string& err)
         mode_ = Mode::Ram;
         return true;
     }
+    // 非バッファ + 非同期で開き直す (失敗時はバッファ付き非同期)
+    HANDLE h = CreateFileW(path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED, nullptr);
+    bool unbuf = h != INVALID_HANDLE_VALUE;
+    if (!unbuf)
+        h = CreateFileW(path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+                        nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+    {
+        err = "オープン失敗: " + LastErrorText();
+        return false;
+    }
     // 非バッファ読み込みはセクタ単位なので末尾を 4096 の倍数に切り上げて確保
     const uint64_t cap = ((size_ + 4095) & ~4095ull) + 4096;
     void* p = VirtualAlloc(nullptr, (SIZE_T)cap, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!p)
     {
         err = "バッファ確保失敗: " + LastErrorText();
+        CloseHandle(h);
         return false;
     }
+    CloseHandle((HANDLE)file_);
+    file_ = h;
+    unbuffered_ = unbuf;
     data_ = (const uint8_t*)p;
     mode_ = Mode::Ram;
     return true;
@@ -197,17 +211,7 @@ bool InputFile::PrepareMapped(std::string& err)
         mode_ = Mode::Mapped;
         return true;
     }
-    // マッピング用に通常ハンドルで開き直す
-    HANDLE h = CreateFileW(path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE)
-    {
-        err = "オープン失敗: " + LastErrorText();
-        return false;
-    }
-    if (file_) CloseHandle((HANDLE)file_);
-    file_ = h;
-    unbuffered_ = false;
-    HANDLE m = CreateFileMappingW(h, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    HANDLE m = CreateFileMappingW((HANDLE)file_, nullptr, PAGE_READONLY, 0, 0, nullptr);
     if (!m)
     {
         err = "マッピング失敗: " + LastErrorText();
