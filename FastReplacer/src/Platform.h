@@ -93,12 +93,15 @@ class TextWriter
 public:
     ~TextWriter() { Close(); }
     bool Open(const NativePath& path, std::string& err);
+    void OpenStdout();  // 標準出力へ書く (Close で閉じずにフラッシュのみ)
     void Write(const std::string& s);
+    void Flush();
     bool Close();
     bool Ok() const { return ok_; }
 
 private:
     std::FILE* fp_ = nullptr;
+    bool owned_ = false;
     bool ok_ = true;
 };
 }  // namespace plat

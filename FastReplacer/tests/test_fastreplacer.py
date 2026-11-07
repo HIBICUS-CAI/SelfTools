@@ -237,7 +237,9 @@ def main():
 
             # --- 検索 ---
             report = os.path.join(root, "rep%d.txt" % case)
-            sargs = build("s" + ("x" if cx else "")) + ["-o", to_tool_path(report, a.wine)]
+            # -x なし & -o なし → 標準出力、それ以外 → レポートファイル
+            use_stdout = (not cx) and rng.random() < 0.5
+            sargs = build("s" + ("x" if cx else "")) + ([] if use_stdout else ["-o", to_tool_path(report, a.wine)])
             r = run_tool(prefix, [to_tool_path(d, a.wine)] + sargs)
             ctx = "case=%d pats=%r mc=%s ww=%s cx=%s chunk=%d threads=%d io=%s args=%r" % (case, pats, mc, ww, cx, chunk, threads, io, sargs)
             if r.returncode != 0:
@@ -245,18 +247,25 @@ def main():
                 env_fail += 1
                 continue
             got, cur = {}, None
-            with open(report, "rb") as f:
-                for raw in f.read().decode("utf-8").splitlines():
-                    if raw.startswith("=== "):
-                        path = raw[4:raw.rindex("  (")]
-                        cur = path.replace("Z:", "").replace("\\", "/") if a.wine else path
-                        got[cur] = []
-                    m = REPORT_RE.match(raw)
-                    if m:
-                        has_ctx = m.group(5) is not None
-                        if has_ctx != cx:
-                            got[cur].append("context-mismatch")
-                        got[cur].append((int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)) if m.group(4) else None))
+            if use_stdout:
+                if [x for x in os.listdir(".") if x.startswith("FastReplacer_report_")]:
+                    print("FAIL(report file created in stdout mode) %s" % ctx)
+                    env_fail += 1
+                text = r.stdout.decode("utf-8")
+            else:
+                with open(report, "rb") as f:
+                    text = f.read().decode("utf-8")
+            for raw in text.splitlines():
+                if raw.startswith("=== "):
+                    path = raw[4:raw.rindex("  (")]
+                    cur = path.replace("Z:", "").replace("\\", "/") if a.wine else path
+                    got[cur] = []
+                m = REPORT_RE.match(raw)
+                if m:
+                    has_ctx = m.group(5) is not None
+                    if has_ctx != cx:
+                        got[cur].append("context-mismatch")
+                    got[cur].append((int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)) if m.group(4) else None))
             for n in targets:
                 exp = [(line_col(files[n], b) + (b, (k + 1) if multi else None)) for b, _, k in expect[n]]
                 if got.get(n, []) != exp:

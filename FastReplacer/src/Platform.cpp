@@ -334,6 +334,7 @@ bool TextWriter::Open(const NativePath& path, std::string& err)
         return false;
     }
     setvbuf(fp_, nullptr, _IOFBF, 8 << 20);
+    owned_ = true;
     return true;
 }
 
@@ -523,20 +524,32 @@ bool TextWriter::Open(const NativePath& path, std::string& err)
         return false;
     }
     setvbuf(fp_, nullptr, _IOFBF, 8 << 20);
+    owned_ = true;
     return true;
 }
 #endif
+
+void TextWriter::OpenStdout()
+{
+    fp_ = stdout;
+    owned_ = false;
+}
 
 void TextWriter::Write(const std::string& s)
 {
     if (fp_ && !s.empty() && std::fwrite(s.data(), 1, s.size(), fp_) != s.size()) ok_ = false;
 }
 
+void TextWriter::Flush()
+{
+    if (fp_) std::fflush(fp_);
+}
+
 bool TextWriter::Close()
 {
     if (fp_)
     {
-        if (std::fclose(fp_) != 0) ok_ = false;
+        if (owned_ ? std::fclose(fp_) != 0 : std::fflush(fp_) != 0) ok_ = false;
         fp_ = nullptr;
     }
     return ok_;

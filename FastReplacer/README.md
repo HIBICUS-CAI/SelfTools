@@ -14,13 +14,13 @@ FastReplacer <フォルダ> -f <検索> [-f <検索2> ...] -s [オプション] 
 |---|---|
 | `-f, --find <text>` | 検索文字列 (必須・複数指定可。全て同じ置換文字列に置き換える) |
 | `-r, --replace <text>` | 置換文字列 (1 つのみ。空文字列 `""` で削除) |
-| `-s, --search-only` | 検索のみ。結果をレポートファイルに書き出す |
+| `-s, --search-only` | 検索のみ。結果を標準出力へ出す (`-x` または `-o` 指定時はレポートファイル) |
 | `-c, --match-case` | 大文字/小文字を区別する (既定: 区別しない) |
 | `-w, --whole-word` | 単語単位で検索する (既定: 無効) |
 | `-R, --recursive` | サブフォルダも対象にする (既定: 直下のみ) |
 | `-e, --escape` | `\\ \n \r \t \0 \xHH \uXXXX \UXXXXXXXX` を解釈する |
-| `-x, --context` | レポートに前後の文脈を出力する (既定: 位置のみ) |
-| `-o, --report <path>` | レポートのパス。既定はカレントの `FastReplacer_report_<日時>.txt` (置換モードは指定時のみ出力) |
+| `-x, --context` | 前後の文脈も出力し、結果をレポートファイルに書き出す |
+| `-o, --report <path>` | レポートのパス。`-x` 時の既定はカレントの `FastReplacer_report_<日時>.txt`。`-x` なしの検索・置換モードでは指定時のみ出力 |
 | `-t, --threads <n>` | スレッド数 (既定: 論理コア数) |
 | `--sequential` | ファイルを 1 つずつ処理する (既定は書き出しと次ファイルの検索を重ねる。HDD 向け) |
 
@@ -35,22 +35,22 @@ FastReplacer <フォルダ> -f <検索> [-f <検索2> ...] -s [オプション] 
 ### 例
 
 ```bat
-FastReplacer D:\logs -f "ERROR" -scw -o D:\report.txt
+FastReplacer D:\logs -f "ERROR" -scw > D:\result.txt
 FastReplacer D:\data -f "旧名称" -f "旧称" -rR "新名称"
 FastReplacer D:\data -f "\r\n" -er "\n"
 FastReplacer D:\logs -f "timeout" -f "refused" -sx
 ```
 
-### レポート (検索モード)
+### 検索結果の出力 (検索モード)
 
-UTF-8 (BOM 付き)。一致ごとに 1 行。既定は位置のみ:
+`-x` なし (既定) はレポートファイルを作らず、同じ内容を標準出力へ流す (リダイレクト推奨)。一致ごとに 1 行:
 
 ```
 === D:\logs\a.txt  (3 件: #1=2 #2=1, 3.20 GiB)
   L120:C5  @48213  #1
 ```
 
-`-x` 指定時は文脈も出力する:
+`-x` 指定時は文脈も出力し、レポートファイル (UTF-8 BOM 付き) に書き出す:
 
 ```
   L120:C5  @48213  #1  前の文脈【一致】後ろの文脈

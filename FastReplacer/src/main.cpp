@@ -68,15 +68,16 @@ void PrintUsage()
         "オプション:\n"
         "  -f, --find <text>      検索文字列 (必須、複数指定可。全て同じ置換文字列に置き換える)\n"
         "  -r, --replace <text>   置換文字列 (空文字列可 = 削除)\n"
-        "  -s, --search-only      検索のみ。結果をレポートファイルに書き出す\n"
+        "  -s, --search-only      検索のみ。結果を標準出力へ出す (-x または -o 指定時はレポートファイル)\n"
         "  -c, --match-case       大文字/小文字を区別する (既定: 区別しない)\n"
         "  -w, --whole-word       単語単位で検索する (既定: 無効)\n"
         "  -R, --recursive        サブフォルダも対象にする (既定: 指定フォルダ直下のみ)\n"
         "  -e, --escape           検索/置換文字列のエスケープを解釈する\n"
         "                         (\\\\ \\n \\r \\t \\0 \\xHH \\uXXXX \\UXXXXXXXX)\n"
-        "  -x, --context          レポートに前後の文脈を出力する (既定: 位置のみ)\n"
+        "  -x, --context          前後の文脈も出力し、結果をレポートファイルに書き出す\n"
         "  -o, --report <path>    レポートファイルのパス\n"
-        "                         (既定: カレントに FastReplacer_report_<日時>.txt。置換モードは指定時のみ出力)\n"
+        "                         (-x 時の既定: カレントに FastReplacer_report_<日時>.txt。\n"
+        "                          -x なしの検索・置換モードでは指定時のみ出力)\n"
         "  -t, --threads <n>      スレッド数 (既定: 論理コア数)\n"
         "      --sequential       ファイルを 1 つずつ処理する (既定は書き出しと次ファイルの検索を重ねる。\n"
         "                         HDD など読み書きの同時実行が遅いディスク向け)\n"
@@ -1060,11 +1061,13 @@ int Run(const std::vector<std::string>& args)
         return 2;
     }
 
-    // レポート
+    // レポート: 検索モードで文脈なし (-x なし) かつ -o 未指定なら、レポート相当の内容を標準出力へ流す
     plat::TextWriter report;
-    const bool useReport = cfg.searchOnly || !cfg.reportPath.empty();
+    const bool toStdout = cfg.searchOnly && !cfg.context && cfg.reportPath.empty();
+    const bool useFile = (cfg.searchOnly && !toStdout) || !cfg.reportPath.empty();
+    const bool useReport = useFile || toStdout;
     NativePath reportPath;
-    if (useReport)
+    if (useFile)
     {
         if (cfg.reportPath.empty()) cfg.reportPath = "FastReplacer_report_" + NowString(true) + ".txt";
         reportPath = plat::FromUtf8(cfg.reportPath);
@@ -1074,18 +1077,39 @@ int Run(const std::vector<std::string>& args)
             return 2;
         }
     }
+    else if (toStdout)
+    {
+        std::setvbuf(stdout, nullptr, _IOFBF, 8 << 20);  // 大量出力向けに全バッファリング (ファイルごとにフラッシュ)
+        report.OpenStdout();
+    }
     // レポート自身と一時ファイルは対象外
     files.erase(std::remove_if(files.begin(), files.end(),
-                               [&](const NativePath& f) { return (useReport && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
+                               [&](const NativePath& f) { return (useFile && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
                 files.end());
 
     const char* mode = cfg.searchOnly ? "検索のみ" : "置換";
     std::printf("FastReplacer  モード: %s  大小区別: %s  単語単位: %s  検索文字列: %zu 個  スレッド: %u  AVX2: %s\n", mode,
                 cfg.opt.matchCase ? "ON" : "OFF", cfg.opt.wholeWord ? "ON" : "OFF", cfg.finds.size(), cfg.threads, simd::HasAvx2() ? "ON" : "OFF");
     std::printf("フォルダ: %s  (%zu ファイル)\n", plat::ToUtf8(dir).c_str(), files.size());
+    if (toStdout)
+    {
+        std::string h;
+        for (size_t k = 0; k < cfg.finds.size(); ++k)
+        {
+            h += "検索 #";
+            AppendU64(h, k + 1);
+            h += ": ";
+            AppendVisible(h, (const uint8_t*)cfg.finds[k].data(), cfg.finds[k].size());
+            h += "\n";
+        }
+        h += "書式: L<行>:C<列(文字)>  @<バイトオフセット>";
+        if (cfg.finds.size() > 1) h += "  #<検索文字列番号>";
+        h += "\n\n";
+        std::fputs(h.c_str(), stdout);
+    }
     std::fflush(stdout);
 
-    if (useReport)
+    if (useFile)
     {
         std::string h = "\xEF\xBB\xBF";  // UTF-8 BOM
         h += "FastReplacer レポート\n";
@@ -1134,7 +1158,7 @@ int Run(const std::vector<std::string>& args)
                      errors.push_back(name + " : " + st.message);
                      std::printf("[%zu/%zu] %s : エラー: %s\n", i + 1, files.size(), name.c_str(), st.message.c_str());
                  }
-                 else
+                 else if (!(toStdout && st.matches))  // 標準出力モードで一致ありのファイルは見出し付きで出力済み
                      std::printf("[%zu/%zu] %s : %llu 件%s  (%s, %.2f s)\n", i + 1, files.size(), name.c_str(), (unsigned long long)st.matches,
                                  (!cfg.searchOnly && st.matches) ? " 置換" : "", FormatBytes(st.size).c_str(), st.seconds);
                  std::fflush(stdout);
@@ -1149,7 +1173,9 @@ int Run(const std::vector<std::string>& args)
                   (unsigned long long)hitFiles, (unsigned long long)totalMatches, (unsigned long long)errFiles, FormatBytes(totalBytes).c_str(), sec,
                   sec > 0 ? totalBytes / sec / 1e9 : 0.0);
     std::fputs(sum, stdout);
-    if (useReport)
+    if (toStdout)
+        report.Close();
+    else if (useFile)
     {
         std::string tail = "\n---\n";
         tail += sum;

@@ -91,6 +91,7 @@ def run(cmd):
     if r.returncode != 0:
         print(r.stderr.decode("utf-8", "replace"))
         sys.exit("FAIL: rc=%d" % r.returncode)
+    return out
 
 
 def main():
@@ -132,6 +133,18 @@ def main():
             sys.exit("FAIL search %s\n exp=%s\n got=%s" % (extra, exp, got))
         print("search %s OK: %s" % (extra, got), flush=True)
         os.remove(report)
+
+    # 標準出力モード (-x なし・-o なし)
+    out = run([a.exe, d, "-f", "NEEDLE", "-s", "-c"])
+    got = []
+    for ln in out.splitlines():
+        m = rx.match(ln)
+        if m:
+            got.append((int(m.group(3)), int(m.group(1)), int(m.group(2))))
+    exp = [(o,) + exp_lc[o] for o in offs]
+    if got != exp:
+        sys.exit("FAIL search stdout\n exp=%s\n got=%s" % (exp, got))
+    print("search [stdout] OK", flush=True)
 
     run([a.exe, d, "-f", "NEEDLE", "-r", REP.decode("utf-8"), "-c"])
     new_size = size + len(offs) * (len(REP) - len(PAT))
