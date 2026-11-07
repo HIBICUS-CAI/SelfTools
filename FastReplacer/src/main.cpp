@@ -49,7 +49,7 @@ struct Config
     bool recursive = false;
     bool escapes = false;
     bool context = false;
-    bool forceMmap = false;
+    bool direct = false;  // RAM へ非バッファ直接読み込み
     MatchOptions opt;
     std::string reportPath;
     unsigned threads = 0;
@@ -80,7 +80,8 @@ void PrintUsage()
         "  -o, --report <path>    レポートファイルのパス\n"
         "                         (既定: カレントに FastReplacer_report_<日時>.txt。置換モードは指定時のみ出力)\n"
         "  -t, --threads <n>      スレッド数 (既定: 論理コア数)\n"
-        "      --mmap             RAM への一括読み込みを行わず、メモリマップで読む\n"
+        "      --direct           OS キャッシュを経由せず RAM へ直接読み込む (未キャッシュの巨大ファイルを\n"
+        "                         高速 SSD から初回に読む場合向け。既定はメモリマップ)\n"
         "  -h, --help             このヘルプ\n"
         "\n"
         "短いオプションはまとめて指定できる (例: -cwR)。値を取るオプションをまとめた場合、\n"
@@ -165,7 +166,7 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         kCtx,
         kReport,
         kThreads,
-        kMmap,
+        kDirect,
         kChunk,
         kMem,
         kHelp,
@@ -182,7 +183,7 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         {'f', "find", kFind, true},          {'r', "replace", kReplace, true},  {'s', "search-only", kSearch, false},
         {'c', "match-case", kCase, false},   {'w', "whole-word", kWord, false}, {'R', "recursive", kRec, false},
         {'e', "escape", kEsc, false},        {'x', "context", kCtx, false},     {'o', "report", kReport, true},
-        {'t', "threads", kThreads, true},    {0, "mmap", kMmap, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
+        {'t', "threads", kThreads, true},    {0, "direct", kDirect, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
         {0, "mem-limit", kMem, true},  // テスト用 (非公開)
         {'h', "help", kHelp, false},
     };
@@ -213,7 +214,7 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         case kCtx: cfg.context = true; break;
         case kReport: cfg.reportPath = v; break;
         case kThreads: cfg.threads = (unsigned)std::strtoul(v.c_str(), nullptr, 10); break;
-        case kMmap: cfg.forceMmap = true; break;
+        case kDirect: cfg.direct = true; break;
         case kChunk: cfg.chunk = std::max<uint64_t>(1, std::strtoull(v.c_str(), nullptr, 10)); break;
         case kMem:
             cfg.memLimit = std::strtoull(v.c_str(), nullptr, 10);
@@ -730,7 +731,7 @@ void Processor::LoaderLane()
         {
             const uint64_t n = job.in.Size();
             const uint64_t need = ((n + 4095) & ~4095ull) + 4096;
-            if (!cfg_.forceMmap && n > 0 && need <= memLimit_)
+            if (cfg_.direct && n > 0 && need <= memLimit_)
             {
                 // 予算が空くまで待つ (先行ファイルの出力完了で解放される)
                 std::unique_lock<std::mutex> lk(mu_);
@@ -1195,14 +1196,14 @@ int Run(const std::vector<std::string>& args)
                                [&](const NativePath& f) { return (useReport && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
                 files.end());
 
-    // RAM 読み込みの予算 (既定: 起動時の空き物理メモリの 80%)
-    const uint64_t memLimit = cfg.forceMmap ? 0 : cfg.hasMemLimit ? cfg.memLimit : plat::AvailableMemory() / 10 * 8;
+    // --direct 時の RAM 読み込み予算 (既定: 起動時の空き物理メモリの 80%)
+    const uint64_t memLimit = !cfg.direct ? 0 : cfg.hasMemLimit ? cfg.memLimit : plat::AvailableMemory() / 10 * 8;
 
     const char* mode = cfg.searchOnly ? "検索のみ" : "置換";
     std::printf("FastReplacer  モード: %s  大小区別: %s  単語単位: %s  検索文字列: %zu 個  スレッド: %u  AVX2: %s\n", mode,
                 cfg.opt.matchCase ? "ON" : "OFF", cfg.opt.wholeWord ? "ON" : "OFF", cfg.finds.size(), cfg.threads, simd::HasAvx2() ? "ON" : "OFF");
     std::printf("フォルダ: %s  (%zu ファイル)  読み込み: %s\n", plat::ToUtf8(dir).c_str(), files.size(),
-                cfg.forceMmap ? "メモリマップ" : ("RAM 直接 (上限 " + FormatBytes(memLimit) + ", 超過時はメモリマップ)").c_str());
+                !cfg.direct ? "メモリマップ" : ("RAM 直接 (上限 " + FormatBytes(memLimit) + ", 超過時はメモリマップ)").c_str());
     std::fflush(stdout);
 
     if (useReport)

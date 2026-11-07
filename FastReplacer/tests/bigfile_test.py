@@ -117,8 +117,8 @@ def main():
 
     exp_lc = expected_line_col(block, offs, size)
     rx = re.compile(r"^  L(\d+):C(\d+)  @(\d+)")
-    # 大小区別あり / なし × RAM 直接読み込み / メモリマップ × 文脈なし / あり
-    for extra in (["-c"], [], ["-c", "--mmap"], ["-x"]):
+    # 大小区別あり / なし × メモリマップ / RAM 直接読み込み × 文脈なし / あり
+    for extra in (["-c"], [], ["-c", "--direct"], ["-x"]):
         report = os.path.join(a.workdir, "big_report.txt")
         run([a.exe, d, "-f", "NEEDLE" if "-c" in extra else "needle", "-s", "-o", report] + extra)
         got = []
@@ -133,7 +133,7 @@ def main():
         print("search %s OK: %s" % (extra, got), flush=True)
         os.remove(report)
 
-    run([a.exe, d, "-f", "NEEDLE", "-r", REP.decode("utf-8"), "-c"])
+    run([a.exe, d, "-f", "NEEDLE", "-r", REP.decode("utf-8"), "-c", "--direct"])
     new_size = size + len(offs) * (len(REP) - len(PAT))
     if os.path.getsize(path) != new_size:
         sys.exit("FAIL size %d != %d" % (os.path.getsize(path), new_size))
