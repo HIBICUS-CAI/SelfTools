@@ -146,9 +146,6 @@ bool SameFile(const NativePath& a, const NativePath& b)
 bool InputFile::Open(const NativePath& path, std::string& err)
 {
     Close();
-    path_ = path;
-    // 通常ハンドルで開く。FILE_FLAG_NO_BUFFERING で開くと、それだけで OS がこのファイルのキャッシュを
-    // 書き出して破棄するため、非バッファ読み込み (--direct) 時のみ PrepareRam で開き直す
     HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE)
     {
@@ -156,7 +153,6 @@ bool InputFile::Open(const NativePath& path, std::string& err)
         return false;
     }
     file_ = h;
-    unbuffered_ = false;
     LARGE_INTEGER sz;
     if (!GetFileSizeEx(h, &sz))
     {
@@ -165,56 +161,12 @@ bool InputFile::Open(const NativePath& path, std::string& err)
         return false;
     }
     size_ = (uint64_t)sz.QuadPart;
-    return true;
-}
-
-bool InputFile::PrepareRam(std::string& err)
-{
-    if (size_ == 0)
-    {
-        mode_ = Mode::Ram;
-        return true;
-    }
-    // 非バッファ + 非同期で開き直す (失敗時はバッファ付き非同期)
-    HANDLE h = CreateFileW(path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED, nullptr);
-    bool unbuf = h != INVALID_HANDLE_VALUE;
-    if (!unbuf)
-        h = CreateFileW(path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-                        nullptr);
-    if (h == INVALID_HANDLE_VALUE)
-    {
-        err = "オープン失敗: " + LastErrorText();
-        return false;
-    }
-    // 非バッファ読み込みはセクタ単位なので末尾を 4096 の倍数に切り上げて確保
-    const uint64_t cap = ((size_ + 4095) & ~4095ull) + 4096;
-    void* p = VirtualAlloc(nullptr, (SIZE_T)cap, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!p)
-    {
-        err = "バッファ確保失敗: " + LastErrorText();
-        CloseHandle(h);
-        return false;
-    }
-    CloseHandle((HANDLE)file_);
-    file_ = h;
-    unbuffered_ = unbuf;
-    data_ = (const uint8_t*)p;
-    mode_ = Mode::Ram;
-    return true;
-}
-
-bool InputFile::PrepareMapped(std::string& err)
-{
-    if (size_ == 0)
-    {
-        mode_ = Mode::Mapped;
-        return true;
-    }
-    HANDLE m = CreateFileMappingW((HANDLE)file_, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    if (size_ == 0) return true;
+    HANDLE m = CreateFileMappingW(h, nullptr, PAGE_READONLY, 0, 0, nullptr);
     if (!m)
     {
         err = "マッピング失敗: " + LastErrorText();
+        Close();
         return false;
     }
     map_ = m;
@@ -222,104 +174,21 @@ bool InputFile::PrepareMapped(std::string& err)
     if (!v)
     {
         err = "MapViewOfFile 失敗: " + LastErrorText();
+        Close();
         return false;
     }
     data_ = (const uint8_t*)v;
-    mode_ = Mode::Mapped;
     return true;
-}
-
-bool InputFile::Load(uint64_t unit, unsigned queueDepth, const std::function<void(size_t)>& onDone, std::string& err)
-{
-    if (mode_ != Mode::Ram || size_ == 0) return true;
-    const size_t units = (size_t)((size_ + unit - 1) / unit);
-    const unsigned qd = std::max(1u, std::min<unsigned>(queueDepth, (unsigned)std::min<size_t>(units, 64)));
-    struct Req
-    {
-        OVERLAPPED ov;
-        HANDLE ev;
-        size_t idx;
-        DWORD expect;
-    };
-    std::vector<Req> reqs(qd);
-    for (auto& r : reqs)
-    {
-        r.ev = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!r.ev)
-        {
-            err = "イベント作成失敗: " + LastErrorText();
-            for (auto& q : reqs)
-                if (q.ev) CloseHandle(q.ev);
-            return false;
-        }
-    }
-    uint8_t* buf = (uint8_t*)data_;
-    bool ok = true;
-    size_t issued = 0, completed = 0;
-    auto issue = [&](Req& r, size_t i) -> bool
-    {
-        const uint64_t off = (uint64_t)i * unit;
-        const uint64_t avail = std::min(unit, size_ - off);
-        const uint64_t len = unbuffered_ ? ((avail + 4095) & ~4095ull) : avail;  // 非バッファはセクタ単位
-        std::memset(&r.ov, 0, sizeof(r.ov));
-        r.ov.Offset = (DWORD)(off & 0xFFFFFFFFu);
-        r.ov.OffsetHigh = (DWORD)(off >> 32);
-        r.ov.hEvent = r.ev;
-        r.idx = i;
-        r.expect = (DWORD)avail;
-        ResetEvent(r.ev);
-        if (!ReadFile((HANDLE)file_, buf + off, (DWORD)len, nullptr, &r.ov) && GetLastError() != ERROR_IO_PENDING)
-        {
-            err = "読み込み失敗: " + LastErrorText();
-            return false;
-        }
-        return true;
-    };
-    while (ok && issued < units && issued < qd)
-    {
-        ok = issue(reqs[issued % qd], issued);
-        if (ok) ++issued;
-    }
-    while (completed < issued)
-    {
-        Req& r = reqs[completed % qd];
-        DWORD got = 0;
-        const BOOL res = GetOverlappedResult((HANDLE)file_, &r.ov, &got, TRUE);
-        if (ok && (!res || got != r.expect))
-        {
-            ok = false;
-            err = res ? "読み込み失敗: サイズ不一致 (読み込み中にファイルが変更された可能性)" : "読み込み失敗: " + LastErrorText();
-        }
-        ++completed;
-        if (ok)
-        {
-            onDone(r.idx);
-            if (issued < units)
-            {
-                ok = issue(r, issued);
-                if (ok) ++issued;
-            }
-        }
-    }
-    for (auto& r : reqs) CloseHandle(r.ev);
-    return ok;
 }
 
 void InputFile::Close()
 {
-    if (data_)
-    {
-        if (mode_ == Mode::Mapped)
-            UnmapViewOfFile(data_);
-        else
-            VirtualFree((void*)data_, 0, MEM_RELEASE);
-    }
+    if (data_) UnmapViewOfFile(data_);
     if (map_) CloseHandle((HANDLE)map_);
     if (file_) CloseHandle((HANDLE)file_);
     data_ = nullptr;
     map_ = file_ = nullptr;
     size_ = 0;
-    mode_ = Mode::None;
 }
 
 namespace
@@ -339,21 +208,13 @@ PrefetchFn GetPrefetch()
 
 void InputFile::Prefetch(uint64_t off, uint64_t len) const
 {
-    if (mode_ != Mode::Mapped || !data_ || off >= size_) return;
+    if (!data_ || off >= size_) return;
     len = std::min(len, size_ - off);
     if (PrefetchFn fn = GetPrefetch())
     {
         RangeEntry e{(PVOID)(data_ + off), (SIZE_T)len};
         fn(GetCurrentProcess(), 1, &e, 0);
     }
-}
-
-uint64_t AvailableMemory()
-{
-    MEMORYSTATUSEX ms;
-    ms.dwLength = sizeof(ms);
-    if (!GlobalMemoryStatusEx(&ms)) return 0;
-    return (uint64_t)ms.ullAvailPhys;
 }
 
 // ---- OutputFile ----
@@ -544,7 +405,6 @@ bool SameFile(const NativePath& a, const NativePath& b) { return a == b; }
 bool InputFile::Open(const NativePath& path, std::string& err)
 {
     Close();
-    path_ = path;
     fd_ = open(path.c_str(), O_RDONLY);
     if (fd_ < 0)
     {
@@ -554,97 +414,33 @@ bool InputFile::Open(const NativePath& path, std::string& err)
     struct stat st;
     fstat(fd_, &st);
     size_ = (uint64_t)st.st_size;
-    return true;
-}
-
-bool InputFile::PrepareRam(std::string& err)
-{
-    mode_ = Mode::Ram;
     if (size_ == 0) return true;
-    void* p = nullptr;
-    if (posix_memalign(&p, 4096, (size_t)(((size_ + 4095) & ~4095ull) + 4096)) != 0)
+    void* p = mmap(nullptr, size_, PROT_READ, MAP_SHARED, fd_, 0);
+    if (p == MAP_FAILED)
     {
-        mode_ = Mode::None;
-        err = "バッファ確保失敗";
+        err = "mmap 失敗: " + ErrnoText();
+        Close();
         return false;
     }
     data_ = (const uint8_t*)p;
     return true;
 }
 
-bool InputFile::PrepareMapped(std::string& err)
-{
-    if (size_ > 0)
-    {
-        void* p = mmap(nullptr, size_, PROT_READ, MAP_SHARED, fd_, 0);
-        if (p == MAP_FAILED)
-        {
-            err = "mmap 失敗: " + ErrnoText();
-            return false;
-        }
-        data_ = (const uint8_t*)p;
-    }
-    mode_ = Mode::Mapped;
-    return true;
-}
-
-bool InputFile::Load(uint64_t unit, unsigned, const std::function<void(size_t)>& onDone, std::string& err)
-{
-    if (mode_ != Mode::Ram || size_ == 0) return true;
-    uint8_t* buf = (uint8_t*)data_;
-    for (uint64_t off = 0, i = 0; off < size_; off += unit, ++i)
-    {
-        const uint64_t len = std::min(unit, size_ - off);
-        uint64_t done = 0;
-        while (done < len)
-        {
-            ssize_t r = pread(fd_, buf + off + done, (size_t)(len - done), (off_t)(off + done));
-            if (r <= 0)
-            {
-                err = r == 0 ? std::string("読み込み失敗: 予期しない EOF") : "読み込み失敗: " + ErrnoText();
-                return false;
-            }
-            done += (uint64_t)r;
-        }
-        onDone((size_t)i);
-    }
-    return true;
-}
-
 void InputFile::Close()
 {
-    if (data_)
-    {
-        if (mode_ == Mode::Mapped)
-            munmap((void*)data_, size_);
-        else
-            std::free((void*)data_);
-    }
+    if (data_) munmap((void*)data_, size_);
     if (fd_ >= 0) close(fd_);
     data_ = nullptr;
     fd_ = -1;
     size_ = 0;
-    mode_ = Mode::None;
 }
 
 void InputFile::Prefetch(uint64_t off, uint64_t len) const
 {
-    if (mode_ != Mode::Mapped || !data_ || off >= size_) return;
+    if (!data_ || off >= size_) return;
     len = std::min(len, size_ - off);
     const uint64_t a = off & ~4095ull;
     madvise((void*)(data_ + a), len + (off - a), MADV_WILLNEED);
-}
-
-uint64_t AvailableMemory()
-{
-    FILE* f = std::fopen("/proc/meminfo", "r");
-    if (!f) return 0;
-    char line[256];
-    uint64_t kb = 0;
-    while (std::fgets(line, sizeof(line), f))
-        if (std::sscanf(line, "MemAvailable: %llu kB", (unsigned long long*)&kb) == 1) break;
-    std::fclose(f);
-    return kb * 1024;
 }
 
 void* AllocAligned(uint64_t size) { return std::aligned_alloc(4096, (size_t)((size + 4095) & ~4095ull)); }

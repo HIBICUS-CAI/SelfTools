@@ -202,7 +202,7 @@ def main():
             cx = rng.random() < 0.5
             chunk = rng.choice([1, 2, 3, 7, 16, 33, 64, 1000, 1 << 20])
             threads = rng.choice([1, 2, 3, 8])
-            io = rng.choice([[], [], ["--direct"], ["--direct"], ["--direct", "--mem-limit", "0"], ["--direct", "--mem-limit", "9000"], ["--direct", "--mem-limit", "70000"]])
+            io = rng.choice([[], [], ["--sequential"]])
             flags = ["e"] + (["c"] if mc else []) + (["w"] if ww else []) + (["R"] if rec else [])
             rng.shuffle(flags)
             merge = rng.random() < 0.5

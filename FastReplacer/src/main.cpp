@@ -49,13 +49,11 @@ struct Config
     bool recursive = false;
     bool escapes = false;
     bool context = false;
-    bool direct = false;  // RAM へ非バッファ直接読み込み
+    bool sequential = false;  // ファイル間の重ね合わせを行わない
     MatchOptions opt;
     std::string reportPath;
     unsigned threads = 0;
     uint64_t chunk = 32ull << 20;
-    bool hasMemLimit = false;
-    uint64_t memLimit = 0;
 };
 
 void PrintUsage()
@@ -80,8 +78,8 @@ void PrintUsage()
         "  -o, --report <path>    レポートファイルのパス\n"
         "                         (既定: カレントに FastReplacer_report_<日時>.txt。置換モードは指定時のみ出力)\n"
         "  -t, --threads <n>      スレッド数 (既定: 論理コア数)\n"
-        "      --direct           OS キャッシュを経由せず RAM へ直接読み込む (未キャッシュの巨大ファイルを\n"
-        "                         高速 SSD から初回に読む場合向け。既定はメモリマップ)\n"
+        "      --sequential       ファイルを 1 つずつ処理する (既定は書き出しと次ファイルの検索を重ねる。\n"
+        "                         HDD など読み書きの同時実行が遅いディスク向け)\n"
         "  -h, --help             このヘルプ\n"
         "\n"
         "短いオプションはまとめて指定できる (例: -cwR)。値を取るオプションをまとめた場合、\n"
@@ -166,9 +164,8 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         kCtx,
         kReport,
         kThreads,
-        kDirect,
+        kSeq,
         kChunk,
-        kMem,
         kHelp,
         kNone
     };
@@ -183,8 +180,7 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         {'f', "find", kFind, true},          {'r', "replace", kReplace, true},  {'s', "search-only", kSearch, false},
         {'c', "match-case", kCase, false},   {'w', "whole-word", kWord, false}, {'R', "recursive", kRec, false},
         {'e', "escape", kEsc, false},        {'x', "context", kCtx, false},     {'o', "report", kReport, true},
-        {'t', "threads", kThreads, true},    {0, "direct", kDirect, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
-        {0, "mem-limit", kMem, true},  // テスト用 (非公開)
+        {'t', "threads", kThreads, true},    {0, "sequential", kSeq, false},         {0, "chunk-size", kChunk, true},  // テスト用 (非公開)
         {'h', "help", kHelp, false},
     };
 
@@ -214,12 +210,8 @@ int ParseArgs(const std::vector<std::string>& a, Config& cfg)
         case kCtx: cfg.context = true; break;
         case kReport: cfg.reportPath = v; break;
         case kThreads: cfg.threads = (unsigned)std::strtoul(v.c_str(), nullptr, 10); break;
-        case kDirect: cfg.direct = true; break;
+        case kSeq: cfg.sequential = true; break;
         case kChunk: cfg.chunk = std::max<uint64_t>(1, std::strtoull(v.c_str(), nullptr, 10)); break;
-        case kMem:
-            cfg.memLimit = std::strtoull(v.c_str(), nullptr, 10);
-            cfg.hasMemLimit = true;
-            break;
         case kHelp: PrintUsage(); return 1;
         default: break;
         }
@@ -597,7 +589,7 @@ void AppendContext(std::string& out, const uint8_t* t, uint64_t n, const Match& 
 }
 
 // ============================================================================
-// ファイル処理 (読み込み → 検索 → 出力 の 3 段パイプライン。段ごとにファイル順を保つ)
+// ファイル処理 (検索 → 出力 の 2 段パイプライン。段ごとにファイル順を保つ)
 // ============================================================================
 struct FileStat
 {
@@ -607,7 +599,6 @@ struct FileStat
     double seconds = 0;
     bool error = false;
     std::string message;
-    const char* mode = "";
 };
 
 struct Job
@@ -615,62 +606,24 @@ struct Job
     NativePath path;
     plat::InputFile in;
     std::chrono::steady_clock::time_point t0;
-    uint64_t charged = 0;  // メモリ予算に計上したバイト数
-
-    // 読み込み進捗 (先頭から順に完了する)
-    std::mutex mu;
-    std::condition_variable cv;
-    uint64_t loaded = 0;  // 先頭から読み込み済みのバイト数
-    bool loadEnded = false;
-    bool loadFailed = false;
-    std::string loadErr;
-
+    bool openFailed = false;
+    std::string openErr;
     std::vector<Match> all;
     FileStat st;
-
-    // [0, end) が読み込まれるまで待つ。読み込み失敗なら false
-    bool WaitLoaded(uint64_t end)
-    {
-        std::unique_lock<std::mutex> lk(mu);
-        cv.wait(lk, [&] { return loaded >= end || loadEnded; });
-        return loaded >= end && !loadFailed;
-    }
-    void SetLoaded(uint64_t v)
-    {
-        {
-            std::lock_guard<std::mutex> lk(mu);
-            loaded = v;
-        }
-        cv.notify_all();
-    }
-    void EndLoad(bool failed, const std::string& e)
-    {
-        {
-            std::lock_guard<std::mutex> lk(mu);
-            loadEnded = true;
-            loadFailed = failed;
-            loadErr = e;
-        }
-        cv.notify_all();
-    }
 };
 
 class Processor
 {
 public:
-    Processor(const Config& cfg, const MultiMatcher& m, plat::TextWriter* report, uint64_t memLimit)
-        : cfg_(cfg), m_(m), report_(report), memLimit_(memLimit)
-    {
-    }
+    Processor(const Config& cfg, const MultiMatcher& m, plat::TextWriter* report) : cfg_(cfg), m_(m), report_(report) {}
 
     // 全ファイルを処理し、ファイル順に onFileDone(i, stat) を呼ぶ (出力段のスレッドから)
     void Run(const std::vector<NativePath>& files, const std::function<void(size_t, const FileStat&)>& onFileDone);
 
 private:
-    static constexpr size_t kMaxInFlight = 3;  // 同時に保持するファイル数 (読み込み/検索/出力)
-    static constexpr unsigned kQueueDepth = 16;
+    // 検索段が出力段より先行できるファイル数 (1 = 出力中のファイルの次を検索)
+    static constexpr size_t kLookahead = 1;
 
-    void LoaderLane();
     void SearchLane();
     void OutputLane(const std::function<void(size_t, const FileStat&)>& onFileDone);
 
@@ -678,25 +631,17 @@ private:
     void WriteSearchReport(const Job& job, plat::TextWriter& rep);
     bool WriteReplaced(const Job& job, const NativePath& tmp, uint64_t newSize, std::string& err);
     void Output(Job& job);
-    uint64_t ReadUnit() const
-    {
-        const uint64_t u = (cfg_.chunk + 4095) & ~4095ull;
-        return std::min<uint64_t>(std::max<uint64_t>(u, 4096), 8ull << 20);
-    }
 
     const Config& cfg_;
     const MultiMatcher& m_;
     plat::TextWriter* report_;
-    const uint64_t memLimit_;
 
     std::vector<std::unique_ptr<Job>> jobs_;
     // 段の進行管理
     std::mutex mu_;
     std::condition_variable cv_;
-    size_t prepared_ = 0;  // 読み込み準備 (Open/確保) を終えたジョブ数
     size_t searched_ = 0;  // 検索を終えたジョブ数
     size_t released_ = 0;  // 出力を終えて解放したジョブ数
-    uint64_t inUse_ = 0;   // RAM バッファの合計
 };
 
 void Processor::Run(const std::vector<NativePath>& files, const std::function<void(size_t, const FileStat&)>& onFileDone)
@@ -707,81 +652,30 @@ void Processor::Run(const std::vector<NativePath>& files, const std::function<vo
         jobs_.push_back(std::make_unique<Job>());
         jobs_.back()->path = f;
     }
-    std::thread loader([&] { LoaderLane(); });
     std::thread output([&] { OutputLane(onFileDone); });
     SearchLane();
-    loader.join();
     output.join();
-}
-
-void Processor::LoaderLane()
-{
-    for (size_t i = 0; i < jobs_.size(); ++i)
-    {
-        Job& job = *jobs_[i];
-        {
-            std::unique_lock<std::mutex> lk(mu_);
-            cv_.wait(lk, [&] { return i < released_ + kMaxInFlight; });
-        }
-        job.t0 = std::chrono::steady_clock::now();
-        std::string err;
-        bool ok = job.in.Open(job.path, err);
-        bool ram = false;
-        if (ok)
-        {
-            const uint64_t n = job.in.Size();
-            const uint64_t need = ((n + 4095) & ~4095ull) + 4096;
-            if (cfg_.direct && n > 0 && need <= memLimit_)
-            {
-                // 予算が空くまで待つ (先行ファイルの出力完了で解放される)
-                std::unique_lock<std::mutex> lk(mu_);
-                cv_.wait(lk, [&] { return inUse_ + need <= memLimit_; });
-                inUse_ += need;
-                job.charged = need;
-                ram = true;
-            }
-            if (ram && !job.in.PrepareRam(err))
-            {
-                // 確保できなければメモリマップへ
-                std::lock_guard<std::mutex> lk(mu_);
-                inUse_ -= job.charged;
-                job.charged = 0;
-                ram = false;
-            }
-            if (!ram) ok = job.in.PrepareMapped(err);
-        }
-        job.st.mode = !ok ? "" : ram ? "RAM" : "mmap";
-        if (!ok) job.EndLoad(true, err);
-        {
-            std::lock_guard<std::mutex> lk(mu_);
-            prepared_ = i + 1;
-        }
-        cv_.notify_all();
-        if (!ok) continue;
-        if (!ram)
-        {
-            job.SetLoaded(job.in.Size());
-            job.EndLoad(false, std::string());
-            continue;
-        }
-        const uint64_t unit = ReadUnit();
-        const uint64_t n = job.in.Size();
-        const bool lok = job.in.Load(unit, kQueueDepth, [&](size_t idx) { job.SetLoaded(std::min(n, (uint64_t)(idx + 1) * unit)); }, err);
-        job.EndLoad(!lok, err);
-    }
 }
 
 void Processor::SearchLane()
 {
+    const size_t ahead = cfg_.sequential ? 0 : kLookahead;
     for (size_t i = 0; i < jobs_.size(); ++i)
     {
         Job& job = *jobs_[i];
         {
             std::unique_lock<std::mutex> lk(mu_);
-            cv_.wait(lk, [&] { return prepared_ > i; });
+            cv_.wait(lk, [&] { return i <= released_ + ahead; });
         }
-        if (*job.st.mode && job.in.Size() > 0) FindMatches(job);  // 準備に失敗したジョブは mode が空
-        job.WaitLoaded(UINT64_MAX);  // 読み込み終了 (成否) を待つ
+        job.t0 = std::chrono::steady_clock::now();
+        std::string err;
+        if (!job.in.Open(job.path, err))
+        {
+            job.openFailed = true;
+            job.openErr = err;
+        }
+        else if (job.in.Size() > 0)
+            FindMatches(job);
         {
             std::lock_guard<std::mutex> lk(mu_);
             searched_ = i + 1;
@@ -806,8 +700,6 @@ void Processor::OutputLane(const std::function<void(size_t, const FileStat&)>& o
         std::vector<Match>().swap(job.all);
         {
             std::lock_guard<std::mutex> lk(mu_);
-            inUse_ -= job.charged;
-            job.charged = 0;
             released_ = i + 1;
         }
         cv_.notify_all();
@@ -821,22 +713,13 @@ void Processor::FindMatches(Job& job)
     const uint64_t cs = cfg_.chunk;
     const size_t nChunks = (size_t)((n + cs - 1) / cs);
     std::vector<std::vector<Match>> per(nChunks);
-    std::atomic<bool> failed{false};
-    const uint64_t margin = (uint64_t)m_.MaxLen() + 64;  // 照合・SIMD 読み込み・単語境界判定で参照する末尾側の余白
     ParallelFor(cfg_.threads, nChunks,
                 [&](size_t c)
                 {
-                    if (failed.load(std::memory_order_relaxed)) return;
                     const uint64_t b = c * cs, e = std::min(n, b + cs);
-                    if (!job.WaitLoaded(std::min(n, e + margin)))
-                    {
-                        failed = true;
-                        return;
-                    }
                     job.in.Prefetch(b, e - b + m_.MaxLen());
                     m_.FindAll(t, n, b, e, per[c]);
                 });
-    if (failed) return;
 
     // チャンク境界をまたぐ重なりを解消 (逐次スキャンと完全に同じ結果にする)
     size_t total = 0;
@@ -1087,10 +970,10 @@ void Processor::Output(Job& job)
 {
     FileStat& st = job.st;
     st.size = st.newSize = job.in.Size();
-    if (job.loadFailed)
+    if (job.openFailed)
     {
         st.error = true;
-        st.message = job.loadErr;
+        st.message = job.openErr;
         return;
     }
     st.matches = job.all.size();
@@ -1196,14 +1079,10 @@ int Run(const std::vector<std::string>& args)
                                [&](const NativePath& f) { return (useReport && plat::SameFile(f, reportPath)) || EndsWith(f, FR_NATIVE(".frtmp")); }),
                 files.end());
 
-    // --direct 時の RAM 読み込み予算 (既定: 起動時の空き物理メモリの 80%)
-    const uint64_t memLimit = !cfg.direct ? 0 : cfg.hasMemLimit ? cfg.memLimit : plat::AvailableMemory() / 10 * 8;
-
     const char* mode = cfg.searchOnly ? "検索のみ" : "置換";
     std::printf("FastReplacer  モード: %s  大小区別: %s  単語単位: %s  検索文字列: %zu 個  スレッド: %u  AVX2: %s\n", mode,
                 cfg.opt.matchCase ? "ON" : "OFF", cfg.opt.wholeWord ? "ON" : "OFF", cfg.finds.size(), cfg.threads, simd::HasAvx2() ? "ON" : "OFF");
-    std::printf("フォルダ: %s  (%zu ファイル)  読み込み: %s\n", plat::ToUtf8(dir).c_str(), files.size(),
-                !cfg.direct ? "メモリマップ" : ("RAM 直接 (上限 " + FormatBytes(memLimit) + ", 超過時はメモリマップ)").c_str());
+    std::printf("フォルダ: %s  (%zu ファイル)\n", plat::ToUtf8(dir).c_str(), files.size());
     std::fflush(stdout);
 
     if (useReport)
@@ -1241,7 +1120,7 @@ int Run(const std::vector<std::string>& args)
         report.Write(h);
     }
 
-    Processor proc(cfg, matcher, useReport ? &report : nullptr, memLimit);
+    Processor proc(cfg, matcher, useReport ? &report : nullptr);
     const auto t0 = std::chrono::steady_clock::now();
     uint64_t totalBytes = 0, totalMatches = 0, hitFiles = 0, errFiles = 0;
     std::vector<std::string> errors;
@@ -1256,8 +1135,8 @@ int Run(const std::vector<std::string>& args)
                      std::printf("[%zu/%zu] %s : エラー: %s\n", i + 1, files.size(), name.c_str(), st.message.c_str());
                  }
                  else
-                     std::printf("[%zu/%zu] %s : %llu 件%s  (%s, %s, %.2f s)\n", i + 1, files.size(), name.c_str(), (unsigned long long)st.matches,
-                                 (!cfg.searchOnly && st.matches) ? " 置換" : "", FormatBytes(st.size).c_str(), st.mode, st.seconds);
+                     std::printf("[%zu/%zu] %s : %llu 件%s  (%s, %.2f s)\n", i + 1, files.size(), name.c_str(), (unsigned long long)st.matches,
+                                 (!cfg.searchOnly && st.matches) ? " 置換" : "", FormatBytes(st.size).c_str(), st.seconds);
                  std::fflush(stdout);
                  totalBytes += st.size;
                  totalMatches += st.matches;
